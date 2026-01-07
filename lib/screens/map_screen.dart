@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -21,7 +22,7 @@ class _MapScreenState extends State<MapScreen> {
   // San Antonio coordinates
   static const LatLng _initialCenter = LatLng(29.4241, -98.4936);
   
-  static const String azureKey = String.fromEnvironment('AZURE_MAPS_KEY', defaultValue: 'YOUR_KEY_HERE');
+  static final String azureKey = dotenv.env['AZURE_MAPS_KEY'] ?? '';
   
   // State
   final MapController _mapController = MapController();
@@ -321,7 +322,7 @@ class _MapScreenState extends State<MapScreen> {
               TileLayer(
                 // Correct Azure Maps V2 Tile URL (singular 'tile', needs tilesetId)
                 urlTemplate: 'https://atlas.microsoft.com/map/tile?api-version=2.0&tilesetId=microsoft.base.darkgrey&zoom={z}&x={x}&y={y}&subscription-key={subscriptionKey}',
-                additionalOptions: const {
+                additionalOptions: {
                   'subscriptionKey': azureKey,
                 },
                 userAgentPackageName: 'com.example.cruze_mobile',

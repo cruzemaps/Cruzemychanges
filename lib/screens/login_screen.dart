@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flutter/foundation.dart'; // For kIsWeb
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -10,8 +13,65 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController nameController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   bool _isPasswordVisible = false;
+  bool _isLogin = true; // Toggle between Login and Signup
+
+  Future<void> _handleAuth() async {
+    final String email = emailController.text.trim();
+    final String password = passwordController.text.trim();
+    final String name = nameController.text.trim();
+
+    if (email.isEmpty || password.isEmpty || (!_isLogin && name.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill all fields')),
+      );
+      return;
+    }
+
+    final String endpoint = _isLogin ? 'login' : 'signup';
+    // Use localhost for Web/iOS, 10.0.2.2 for Android Emulator.
+    // Since we removed dart:io to support Web, we default to localhost.
+    final String baseUrl = 'http://127.0.0.1:7071/api'; 
+    
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/$endpoint'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+          if (!_isLogin) 'name': name,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        if (!mounted) return;
+        if (_isLogin) {
+           Navigator.of(context).pushReplacementNamed('/map');
+        } else {
+           // Signup Success -> Switch to Login
+           ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Account created! Please log in.')),
+          );
+           setState(() {
+             _isLogin = true;
+           });
+        }
+      } else {
+         if (!mounted) return;
+         ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${response.body}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Connection Error: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +79,6 @@ class _LoginScreenState extends State<LoginScreen> {
     const Color primaryColor = Color(0xFFff791a); // Safety Orange
     const Color backgroundDark = Color(0xFF121212); // Charcoal
     const Color surfaceDark = Color(0xFF1E1E1E); // Card Background
-    // const Color surfaceLight = Color(0xFF2A2A2A); // Lighter Surface (Unused)
     const Color textMain = Colors.white;
     const Color textSecondary = Color(0xFF9CA3AF); // Gray 400
 
@@ -62,7 +121,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Log in to your dashboard',
+                      _isLogin ? 'Log in to your dashboard' : 'Create a new account',
                       style: GoogleFonts.inter(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
@@ -77,9 +136,35 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Username Field
+                           // Name Field (Signup Only)
+                           if (!_isLogin) ...[
+                              Text(
+                                'Full Name',
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: textMain,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: nameController,
+                                style: GoogleFonts.inter(
+                                    color: textMain, fontSize: 16),
+                                decoration: InputDecoration(
+                                  hintText: 'John Doe',
+                                  hintStyle: GoogleFonts.inter(color: Colors.grey[600]),
+                                  filled: true,
+                                  fillColor: surfaceDark,
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                           ],
+                        
+                          // Email Field (Renamed from Username)
                           Text(
-                            'Username or Email',
+                            'Email',
                             style: GoogleFonts.inter(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -88,7 +173,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 8),
                           TextField(
-                            controller: nameController,
+                            controller: emailController,
                             style: GoogleFonts.inter(
                                 color: textMain, fontSize: 16),
                             decoration: InputDecoration(
@@ -166,36 +251,37 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           
-                          // Forgot Password Link
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Reset link sent to email')),
-                                );
-                              },
-                              child: Text(
-                                'Forgot Password?',
-                                style: GoogleFonts.inter(
-                                  color: textSecondary,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
+                          // Forgot Password Link (Login Only)
+                          if (_isLogin)
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Reset link sent to email')),
+                                  );
+                                },
+                                child: Text(
+                                  'Forgot Password?',
+                                  style: GoogleFonts.inter(
+                                    color: textSecondary,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
+                            )
+                          else
+                             const SizedBox(height: 24),
 
                           const SizedBox(height: 16),
 
-                          // Login Button
+                          // Login/Signup Button
                           SizedBox(
                             width: double.infinity,
                             height: 56,
                             child: ElevatedButton(
-                              onPressed: () {
-                                Navigator.of(context).pushReplacementNamed('/map');
-                              },
+                              onPressed: _handleAuth,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: primaryColor,
                                 foregroundColor: Colors.white,
@@ -206,10 +292,45 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ),
                               child: Text(
-                                'Log In',
+                                _isLogin ? 'Log In' : 'Sign Up',
                                 style: GoogleFonts.inter(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 24),
+                          
+                           // Toggle Login/Signup
+                          Center(
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _isLogin = !_isLogin;
+                                  // Clear fields
+                                  emailController.clear();
+                                  passwordController.clear();
+                                  nameController.clear();
+                                });
+                              },
+                              child: Text.rich(
+                                TextSpan(
+                                  text: _isLogin ? "Don't have an account? " : "Already have an account? ",
+                                  style: GoogleFonts.inter(
+                                    color: textSecondary,
+                                    fontSize: 14,
+                                  ),
+                                  children: [
+                                    TextSpan(
+                                      text: _isLogin ? 'Sign Up' : 'Log In',
+                                      style: GoogleFonts.inter(
+                                        color: primaryColor,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -219,28 +340,17 @@ class _LoginScreenState extends State<LoginScreen> {
                           
                           // Need Help
                           Center(
-                            child: GestureDetector(
-                              onTap: () {
+                            child: TextButton(
+                              onPressed: () {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text('Calling Dispatch...')),
                                 );
                               },
-                              child: Text.rich(
-                                TextSpan(
-                                  text: 'Need help? ',
-                                  style: GoogleFonts.inter(
-                                    color: textSecondary,
-                                    fontSize: 14,
-                                  ),
-                                  children: [
-                                    TextSpan(
-                                      text: 'Contact Dispatch',
-                                      style: GoogleFonts.inter(
-                                        color: textMain,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
+                              child: Text(
+                                'Contact Dispatch',
+                                style: GoogleFonts.inter(
+                                  color: textSecondary,
+                                  fontSize: 12,
                                 ),
                               ),
                             ),

@@ -4,7 +4,11 @@ import 'package:cruze_mobile/screens/login_screen.dart';
 import 'package:cruze_mobile/screens/map_screen.dart';
 import 'package:cruze_mobile/screens/profile_screen.dart';
 
-void main() {
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: "env/.env");
   runApp(const CruzeApp());
 }
 
