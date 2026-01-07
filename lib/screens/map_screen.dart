@@ -7,6 +7,9 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+import 'dart:io' show Platform;
+import 'package:geolocator/geolocator.dart';
+
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
@@ -18,10 +21,13 @@ class _MapScreenState extends State<MapScreen> {
   // San Antonio coordinates
   static const LatLng _initialCenter = LatLng(29.4241, -98.4936);
   
-  // Azure Maps Key
-  static const String azureKey = "PLACEHOLDER_KEY";
+  static const String azureKey = String.fromEnvironment('AZURE_MAPS_KEY', defaultValue: 'YOUR_KEY_HERE');
   
   // State
+  final MapController _mapController = MapController();
+  LatLng _currentPosition = _initialCenter;
+  StreamSubscription<Position>? _positionStreamSubscription;
+
   bool _crashDetected = false;
   StreamSubscription? _accelerometerSubscription;
   DateTime? _lastShakeTime;
@@ -30,8 +36,55 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+
     _startListening();
+    _startLocationUpdates();
     _fetchRoute();
+  }
+
+  Future<void> _startLocationUpdates() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    // Test if location services are enabled.
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      // Location services are not enabled don't continue
+      // accessing the position and request users of the 
+      // App to enable the location services.
+      return;
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        return;
+      }
+    }
+    
+    if (permission == LocationPermission.deniedForever) {
+      return;
+    }
+
+    // When we reach here, permissions are granted and we can
+    // continue accessing the position of the device.
+    const LocationSettings locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 10,
+    );
+    
+    _positionStreamSubscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+      (Position position) {
+        final newLatLng = LatLng(position.latitude, position.longitude);
+        setState(() {
+          _currentPosition = newLatLng;
+        });
+        
+        // Move the map to follow the driver
+        _mapController.move(newLatLng, 15.0);
+      },
+    );
   }
 
   Future<void> _fetchRoute() async {
@@ -81,7 +134,7 @@ class _MapScreenState extends State<MapScreen> {
     // Send to API
     try {
       final response = await http.post(
-        Uri.parse('http://localhost:7071/api/telemetry'), 
+        Uri.parse('http://${Platform.isAndroid ? '10.0.2.2' : 'localhost'}:7071/api/telemetry'), 
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'lat': _initialCenter.latitude,
@@ -90,15 +143,16 @@ class _MapScreenState extends State<MapScreen> {
           'g_force': gForce,
         }),
       );
-      print('Telemetry sent: ${response.statusCode}');
+      debugPrint('Telemetry sent: ${response.statusCode}');
     } catch (e) {
-      print('Error sending telemetry: $e');
+      debugPrint('Error sending telemetry: $e');
     }
   }
 
   @override
   void dispose() {
     _accelerometerSubscription?.cancel();
+    _positionStreamSubscription?.cancel();
     super.dispose();
   }
 
@@ -108,6 +162,7 @@ class _MapScreenState extends State<MapScreen> {
       body: Stack(
         children: [
           FlutterMap(
+            mapController: _mapController,
             options: const MapOptions(
               initialCenter: _initialCenter,
               initialZoom: 13.0,
@@ -116,7 +171,7 @@ class _MapScreenState extends State<MapScreen> {
               TileLayer(
                 urlTemplate: 'https://atlas.microsoft.com/map/tiles?subscription-key={subscriptionKey}&api-version=2.0&layer=basic&style=dark&zoom={z}&x={x}&y={y}',
                 additionalOptions: const {
-                  'subscriptionKey': _azureKey,
+                  'subscriptionKey': azureKey,
                 },
                 userAgentPackageName: 'com.example.cruze_mobile',
               ),
@@ -129,13 +184,13 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ],
               ),
-              const MarkerLayer(
+              MarkerLayer(
                 markers: [
                   Marker(
-                    point: _initialCenter,
+                    point: _currentPosition,
                     width: 40,
                     height: 40,
-                    child: Icon(
+                    child: const Icon(
                       Icons.navigation,
                       color: Colors.blue,
                       size: 40,
