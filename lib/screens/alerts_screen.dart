@@ -17,6 +17,13 @@ class _AlertsScreenState extends State<AlertsScreen> {
   static const Color surfaceLighter = Color(0xFF2A2A2A); // Chip Background
 
   int _selectedIndex = 2; // "Alerts" selected by default
+  String _selectedFilter = 'All';
+
+  void _handleMarkAllRead() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('All alerts marked as read!'), backgroundColor: Colors.green),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,8 +31,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
       backgroundColor: Colors.black, // Outer background
       body: Center(
         child: Container(
-          // Simulate the max-width container from HTML
-          constraints: const BoxConstraints(maxWidth: 450),
+          // Using consistent 600px max width for responsiveness
+          constraints: const BoxConstraints(maxWidth: 600),
           decoration: BoxDecoration(
             color: backgroundDark,
             boxShadow: [
@@ -51,6 +58,11 @@ class _AlertsScreenState extends State<AlertsScreen> {
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 100), // Bottom padding for FAB
+// ... (List Content is same, skipping replace for brevity if possible but replace_file_content needs contiguity)
+// I will keep the replacement block focused on the top part if I can match it, or replacing methods below.
+// Actually, I'll just replace the methods _buildHeader, _buildFilterChips, _buildChip directly as they are separate blocks below.
+// I'll return to just adding the state variable at the top first.
+
                   children: [
                     _buildSectionHeader('TODAY'),
                     const SizedBox(height: 16),
@@ -200,7 +212,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
             ),
           ),
           TextButton(
-            onPressed: () {},
+            onPressed: _handleMarkAllRead,
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               backgroundColor: Colors.transparent,
@@ -226,69 +238,76 @@ class _AlertsScreenState extends State<AlertsScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
         children: [
-          _buildChip('All', isSelected: true),
+          _buildChip('All', isSelected: _selectedFilter == 'All'),
           const SizedBox(width: 12),
-          _buildChip('Danger', badgeCount: 3),
+          _buildChip('Danger', isSelected: _selectedFilter == 'Danger', badgeCount: 3),
           const SizedBox(width: 12),
-          _buildChip('Resolved'),
+          _buildChip('Resolved', isSelected: _selectedFilter == 'Resolved'),
           const SizedBox(width: 12),
-          _buildChip('Geofence'),
+          _buildChip('Geofence', isSelected: _selectedFilter == 'Geofence'),
         ],
       ),
     );
   }
 
   Widget _buildChip(String label, {bool isSelected = false, int? badgeCount}) {
-    return Container(
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: isSelected ? primaryColor : surfaceLighter,
-        borderRadius: BorderRadius.circular(999),
-        border: isSelected ? null : Border.all(color: Colors.white.withOpacity(0.05)),
-        boxShadow: isSelected
-            ? [
-                BoxShadow(
-                  color: primaryColor.withOpacity(0.2),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                )
-              ]
-            : null,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              color: isSelected ? Colors.white : Colors.white.withOpacity(0.7),
-              fontSize: 14,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
-          if (badgeCount != null) ...[
-            const SizedBox(width: 8),
-            Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                color: primaryColor.withOpacity(0.2),
-                shape: BoxShape.circle,
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedFilter = label;
+        });
+      },
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: isSelected ? primaryColor : surfaceLighter,
+          borderRadius: BorderRadius.circular(999),
+          border: isSelected ? null : Border.all(color: Colors.white.withOpacity(0.05)),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: primaryColor.withOpacity(0.2),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  )
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                color: isSelected ? Colors.white : Colors.white.withOpacity(0.7),
+                fontSize: 14,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
               ),
-              child: Center(
-                child: Text(
-                  badgeCount.toString(),
-                  style: GoogleFonts.inter(
-                    color: primaryColor,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+            ),
+            if (badgeCount != null) ...[
+              const SizedBox(width: 8),
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: primaryColor.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    badgeCount.toString(),
+                    style: GoogleFonts.inter(
+                      color: primaryColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

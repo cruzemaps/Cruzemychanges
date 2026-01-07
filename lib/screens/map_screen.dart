@@ -31,6 +31,8 @@ class _MapScreenState extends State<MapScreen> {
   bool _crashDetected = false;
   StreamSubscription? _accelerometerSubscription;
   DateTime? _lastShakeTime;
+  LatLng? _destination;
+  String? _routeDistance;
   List<LatLng> _routePoints = [];
 
   @override
@@ -39,19 +41,14 @@ class _MapScreenState extends State<MapScreen> {
 
     _startListening();
     _startLocationUpdates();
-    _fetchRoute();
   }
 
   Future<void> _startLocationUpdates() async {
     bool serviceEnabled;
     LocationPermission permission;
 
-    // Test if location services are enabled.
     serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      // Location services are not enabled don't continue
-      // accessing the position and request users of the 
-      // App to enable the location services.
       return;
     }
 
@@ -67,8 +64,6 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
-    // When we reach here, permissions are granted and we can
-    // continue accessing the position of the device.
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 10,
@@ -77,34 +72,146 @@ class _MapScreenState extends State<MapScreen> {
     _positionStreamSubscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(
       (Position position) {
         final newLatLng = LatLng(position.latitude, position.longitude);
-        setState(() {
-          _currentPosition = newLatLng;
-        });
-        
-        // Move the map to follow the driver
-        _mapController.move(newLatLng, 15.0);
+        if (mounted) {
+          setState(() {
+            _currentPosition = newLatLng;
+          });
+          _mapController.move(newLatLng, 15.0);
+        }
       },
     );
   }
 
-  Future<void> _fetchRoute() async {
-    // Simulate API call to GET /api/route
-    // Ideally: http.get(Uri.parse('http://localhost:7071/api/route?start=...&end=...'))
+  // Search State
+  final TextEditingController _searchController = TextEditingController();
+  List<dynamic> _searchResults = [];
+  bool _isSearching = false;
+  Timer? _debounce;
+  
+  // San Antonio High Risk Zones (Lat, Lng)
+  final List<LatLng> _highRiskZones = [
+    const LatLng(29.5547, -98.6630), // Loop 1604 & Bandera Road
+    const LatLng(29.4382, -98.6430), // Highway 151 & Loop 410
+    const LatLng(29.6003, -98.5983), // Loop 1604 & I-10 North
+    const LatLng(29.5223, -98.4972), // Loop 410 & San Pedro Avenue
+    const LatLng(29.4911, -98.7030), // Loop 1604 & Culebra Road
+  ];
+
+  // ... existing methods ...
+
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      if (query.isNotEmpty) {
+        _performSearch(query);
+      } else {
+        setState(() {
+          _searchResults = [];
+          _isSearching = false;
+        });
+      }
+    });
+  }
+
+  Future<void> _performSearch(String query) async {
+    setState(() => _isSearching = true);
+    final Uri uri = Uri.parse(
+        'https://atlas.microsoft.com/search/fuzzy/json?api-version=1.0&query=$query&subscription-key=$azureKey&lat=${_currentPosition.latitude}&lon=${_currentPosition.longitude}');
+
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _searchResults = data['results'];
+        });
+      }
+    } catch (e) {
+      debugPrint('Error searching: $e');
+    } finally {
+      setState(() => _isSearching = false);
+    }
+  }
+
+  void _selectSearchResult(dynamic result) {
+    final position = result['position'];
+    final point = LatLng(position['lat'], position['lon']);
     
-    // For demo stability, we'll implement the fallback/mock directly here 
-    // to ensure the Blue Polyline appears as requested.
+    _mapController.move(point, 15.0);
+    _setDestination(point);
     
-    await Future.delayed(const Duration(seconds: 1)); // Sim network
+    setState(() {
+      _searchResults = [];
+      _searchController.text = result['address']['freeformAddress'] ?? '';
+      FocusScope.of(context).unfocus(); // Hide keyboard
+    });
+  }
+
+  Future<void> _setDestination(LatLng point) async {
+    setState(() {
+      _destination = point;
+      _routePoints = []; // Clear previous route while loading
+      _routeDistance = "Calculating...";
+      // Clear search results if set via tap
+      if (_searchResults.isNotEmpty) _searchResults = []; 
+    });
     
-    if (mounted) {
-      setState(() {
-        _routePoints = [
-          _initialCenter,
-          const LatLng(29.4200, -98.4900),
-          const LatLng(29.4150, -98.4850),
-          const LatLng(29.4100, -98.4800),
-        ]; 
-      });
+    await _fetchRealRoute(_currentPosition, point);
+  }
+
+  Future<void> _fetchRealRoute(LatLng start, LatLng end) async {
+    final String query = '${start.latitude},${start.longitude}:${end.latitude},${end.longitude}';
+    final Uri uri = Uri.parse(
+        'https://atlas.microsoft.com/route/directions/json?api-version=1.0&query=$query&subscription-key=$azureKey&routeRepresentation=polyline');
+
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final routes = data['routes'] as List;
+        if (routes.isNotEmpty) {
+          final legs = routes[0]['legs'] as List;
+          final points = <LatLng>[];
+          
+          // Basic summary for distance
+          if (data['routes'][0]['summary'] != null) {
+              final lengthInMeters = data['routes'][0]['summary']['lengthInMeters'];
+              final km = (lengthInMeters / 1000).toStringAsFixed(1);
+              if (mounted) {
+                 setState(() {
+                   _routeDistance = "$km km";
+                 });
+              }
+          }
+
+          for (var leg in legs) {
+            final pointsData = leg['points'] as List;
+            for (var point in pointsData) {
+              points.add(LatLng(point['latitude'], point['longitude']));
+            }
+          }
+
+          if (mounted) {
+            setState(() {
+              _routePoints = points;
+            });
+          }
+        }
+      } else {
+        debugPrint('Error fetching route: ${response.statusCode}');
+        if (mounted) {
+           setState(() {
+             _routeDistance = "Error";
+           });
+        }
+      }
+    } catch (e) {
+      debugPrint('Exception fetching route: $e');
+         if (mounted) {
+           setState(() {
+             _routeDistance = "Error";
+           });
+        }
     }
   }
 
@@ -163,83 +270,264 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           FlutterMap(
             mapController: _mapController,
-            options: const MapOptions(
+            options: MapOptions(
               initialCenter: _initialCenter,
               initialZoom: 13.0,
+              onTap: (tapPosition, point) {
+                _setDestination(point);
+              },
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://atlas.microsoft.com/map/tiles?subscription-key={subscriptionKey}&api-version=2.0&layer=basic&style=dark&zoom={z}&x={x}&y={y}',
+                // Correct Azure Maps V2 Tile URL (singular 'tile', needs tilesetId)
+                urlTemplate: 'https://atlas.microsoft.com/map/tile?api-version=2.0&tilesetId=microsoft.base.darkgrey&zoom={z}&x={x}&y={y}&subscription-key={subscriptionKey}',
                 additionalOptions: const {
                   'subscriptionKey': azureKey,
                 },
                 userAgentPackageName: 'com.example.cruze_mobile',
               ),
+              // High Risk Zones Layer
+              CircleLayer(
+                circles: _highRiskZones.map((zone) => CircleMarker(
+                  point: zone,
+                  color: Colors.red.withOpacity(0.3),
+                  borderColor: Colors.red.withOpacity(0.7),
+                  borderStrokeWidth: 2,
+                  radius: 500, // ~500 meters visual radius (approximate for pixel/zoom) - flutter_map uses pixels or meters depending on validation. CircleMarker radius is in pixels usually but let's check. 
+                  // Wait, CircleMarker radius is "radius", usually pixels. To map to real-world meters implies using a different layer or dynamic calculation. 
+                  // For simple visualization, 100 logical pixels at high zoom is fine, but might be huge at low zoom. 
+                  // Ideally use a Polygon for specific geofence, but CircleMarker is easy. 
+                  // Let's use useRadiusInMeter = true if available or accepted in this version.
+                  // Checking docs: flutter_map 6+ CircleMarker has 'useRadiusInMeter'.
+                  useRadiusInMeter: true,
+                )).toList(),
+              ),
               PolylineLayer(
                 polylines: [
-                  Polyline(
-                    points: _routePoints,
-                    color: Colors.blue,
-                    strokeWidth: 4.0,
-                  ),
+                  if (_routePoints.isNotEmpty)
+                    Polyline(
+                      points: _routePoints,
+                      color: const Color(0xFFff791a), // Safety Orange
+                      strokeWidth: 4.0,
+                    ),
                 ],
               ),
               MarkerLayer(
                 markers: [
+                   // Risk Zone Icons (Warning Signs)
+                   ..._highRiskZones.map((zone) => Marker(
+                      point: zone,
+                      width: 30,
+                      height: 30,
+                      child: const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 24),
+                   )),
                   Marker(
                     point: _currentPosition,
                     width: 40,
                     height: 40,
-                    child: const Icon(
-                      Icons.navigation,
-                      color: Colors.blue,
-                      size: 40,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFff791a).withOpacity(0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.navigation,
+                        color: Color(0xFFff791a), // Safety Orange
+                        size: 30,
+                      ),
                     ),
                   ),
+                  if (_destination != null)
+                     Marker(
+                      point: _destination!,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(
+                        Icons.location_on,
+                        color: Colors.red,
+                        size: 40,
+                      ),
+                    ),
                 ],
               ),
             ],
           ),
-          // HUD Overlay
+          // Search Bar & Results
           Positioned(
-            top: 50,
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: Column(
+                  children: [
+                    // Search Input
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E1E),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextField(
+                            controller: _searchController,
+                            onChanged: _onSearchChanged,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'Search destination...',
+                              hintStyle: TextStyle(color: Colors.grey[600]),
+                              prefixIcon: const Icon(Icons.search, color: Color(0xFFff791a)),
+                              suffixIcon: _searchController.text.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, color: Colors.grey),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        _onSearchChanged('');
+                                      },
+                                    )
+                                  : null,
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            ),
+                          ),
+                          if (_isSearching)
+                            const LinearProgressIndicator(
+                              color: Color(0xFFff791a),
+                              backgroundColor: Colors.transparent,
+                              minHeight: 2,
+                            ),
+                        ],
+                      ),
+                    ),
+                    
+                    // Search Results Overlay
+                    if (_searchResults.isNotEmpty)
+                      Container(
+                         margin: const EdgeInsets.only(top: 8),
+                         decoration: BoxDecoration(
+                           color: const Color(0xFF1E1E1E),
+                           borderRadius: BorderRadius.circular(12),
+                           boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8)],
+                         ),
+                         constraints: const BoxConstraints(maxHeight: 200),
+                         child: ListView.builder(
+                           shrinkWrap: true,
+                           itemCount: _searchResults.length,
+                           itemBuilder: (context, index) {
+                             final result = _searchResults[index];
+                             final address = result['address']['freeformAddress'] ?? 'Unknown location';
+                             final name = result['poi'] != null ? result['poi']['name'] : address;
+                             
+                             return ListTile(
+                               leading: const Icon(Icons.location_on_outlined, color: Colors.grey),
+                               title: Text(name, style: const TextStyle(color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                               subtitle: name != address ? Text(address, style: TextStyle(color: Colors.grey[400], fontSize: 12), maxLines: 1) : null,
+                               onTap: () => _selectSearchResult(result),
+                             );
+                           },
+                         ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // HUD Overlay (Moved Down)
+          Positioned(
+            bottom: 40, // Moved to bottom for cleaner look or just lower top? Let's move to bottom to allow search at top
             left: 20,
             right: 20,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.8),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.blue.withOpacity(0.3)),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min, // Wrap content suitable for bottom
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'SAFETY SCORE',
-                        style: TextStyle(
-                          color: Colors.grey,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
+                   if (_routeDistance != null) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFff791a).withOpacity(0.95),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8)],
                       ),
-                      Text(
-                        '100',
-                        style: TextStyle(
-                          color: Colors.green,
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                           const Icon(Icons.directions_car, color: Colors.white, size: 20),
+                           const SizedBox(width: 8),
+                           Text(
+                            'Trip: $_routeDistance',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(width: 12),
+                          Container(width: 1, height: 20, color: Colors.white30),
+                          const SizedBox(width: 4),
+                           GestureDetector(
+                             onTap: () {
+                               setState(() {
+                                 _routePoints = [];
+                                 _destination = null;
+                                 _routeDistance = null;
+                                 _searchController.clear();
+                               });
+                             },
+                             child: const Padding(
+                               padding: EdgeInsets.all(4.0),
+                               child: Icon(Icons.close, color: Colors.white, size: 20),
+                             ),
+                           ),
+                        ],
                       ),
-                    ],
-                  ),
-                  Icon(
-                    Icons.shield,
-                    color: Colors.green,
-                    size: 32,
+                    ),
+                  ],
+                   
+                   // Safety Score Card
+                   Container(
+                    padding: const EdgeInsets.all(16),
+                    constraints: const BoxConstraints(maxWidth: 400),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF121212).withOpacity(0.9), // Background Dark
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFff791a).withOpacity(0.3)), // Border Orange
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'SAFETY SCORE',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '100',
+                              style: TextStyle(
+                                color: Color(0xFFff791a), // Safety Orange
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Icon(
+                          Icons.shield,
+                          color: Color(0xFFff791a), // Safety Orange
+                          size: 32,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
