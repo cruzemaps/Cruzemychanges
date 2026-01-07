@@ -23,12 +23,7 @@ You must create them manually.
 
 1.  Create a folder named `env` in the root directory.
 2.  Create a file named `.env` inside `env/` (Path: `cruze/env/.env`).
-3.  Paste the following keys into that file:
 
-```properties
-AZURE_MAPS_KEY=REDACTED_AZURE_MAPS_KEY
-COSMOS_DB_KEY=REDACTED_COSMOS_DB_KEY
-```
 
 ### 3. Setup Backend (The Brain)
 We use a Python backend for Authentication and Crash Telemetry.
