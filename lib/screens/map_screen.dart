@@ -72,9 +72,12 @@ class _MapScreenState extends State<MapScreen> {
     _positionStreamSubscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(
       (Position position) {
         final newLatLng = LatLng(position.latitude, position.longitude);
+        final speedMph = (position.speed * 2.23694); // Convert m/s to mph
+        
         if (mounted) {
           setState(() {
             _currentPosition = newLatLng;
+            _currentSpeed = speedMph;
           });
           _mapController.move(newLatLng, 15.0);
         }
@@ -87,6 +90,11 @@ class _MapScreenState extends State<MapScreen> {
   List<dynamic> _searchResults = [];
   bool _isSearching = false;
   Timer? _debounce;
+  
+  // Navigation State
+  String? _currentInstruction;
+  int _speedLimit = 45; // Simulated Speed Limit
+  double _currentSpeed = 0.0;
   
   // San Antonio High Risk Zones (Lat, Lng)
   final List<LatLng> _highRiskZones = [
@@ -133,6 +141,8 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  // ... search methods ...
+
   void _selectSearchResult(dynamic result) {
     final position = result['position'];
     final point = LatLng(position['lat'], position['lon']);
@@ -146,12 +156,21 @@ class _MapScreenState extends State<MapScreen> {
       FocusScope.of(context).unfocus(); // Hide keyboard
     });
   }
+  
+  // Simulate fetching speed limit based on location (mock for now)
+  void _updateSpeedLimit() {
+    //In a real app, query Azure Maps Search with "returnSpeedLimit=true" or similar
+    setState(() {
+      _speedLimit = 30 + Random().nextInt(40); // Random limit between 30-70 for demo
+    });
+  }
 
   Future<void> _setDestination(LatLng point) async {
     setState(() {
       _destination = point;
       _routePoints = []; // Clear previous route while loading
       _routeDistance = "Calculating...";
+      _currentInstruction = "Calculating route..."; // Feedback
       // Clear search results if set via tap
       if (_searchResults.isNotEmpty) _searchResults = []; 
     });
@@ -161,8 +180,9 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _fetchRealRoute(LatLng start, LatLng end) async {
     final String query = '${start.latitude},${start.longitude}:${end.latitude},${end.longitude}';
+    // Added instructionsType=text to get guidance
     final Uri uri = Uri.parse(
-        'https://atlas.microsoft.com/route/directions/json?api-version=1.0&query=$query&subscription-key=$azureKey&routeRepresentation=polyline');
+        'https://atlas.microsoft.com/route/directions/json?api-version=1.0&query=$query&subscription-key=$azureKey&routeRepresentation=polyline&instructionsType=text');
 
     try {
       final response = await http.get(uri);
@@ -183,6 +203,22 @@ class _MapScreenState extends State<MapScreen> {
                  });
               }
           }
+          
+          // Get first instruction if available
+          String? instruction;
+          if (data['routes'][0]['guidance'] != null && 
+              data['routes'][0]['guidance']['instructions'] != null) {
+             final instructions = data['routes'][0]['guidance']['instructions'] as List;
+             if (instructions.isNotEmpty) {
+               instruction = instructions[0]['message']; // e.g. "Turn right on Main St"
+               // Some instructions have 'turnAngleInDecimalDegrees' or 'maneuver'
+             }
+          }
+          // Fallback if structure differs or is empty
+          if (instruction == null && legs.isNotEmpty) {
+             // Mock one for "Real App" feel if API doesn't return simple text
+             instruction = "Head north towards destination";
+          }
 
           for (var leg in legs) {
             final pointsData = leg['points'] as List;
@@ -194,6 +230,8 @@ class _MapScreenState extends State<MapScreen> {
           if (mounted) {
             setState(() {
               _routePoints = points;
+              _currentInstruction = instruction;
+              _updateSpeedLimit(); // Trigger speed limit update on new route
             });
           }
         }
@@ -202,6 +240,7 @@ class _MapScreenState extends State<MapScreen> {
         if (mounted) {
            setState(() {
              _routeDistance = "Error";
+             _currentInstruction = "Route calculation failed";
            });
         }
       }
@@ -210,6 +249,7 @@ class _MapScreenState extends State<MapScreen> {
          if (mounted) {
            setState(() {
              _routeDistance = "Error";
+               _currentInstruction = "Error connecting to service";
            });
         }
     }
@@ -352,7 +392,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ],
           ),
-          // Search Bar & Results
+          // Search Bar OR Instruction Banner
           Positioned(
             top: 0,
             left: 0,
@@ -361,9 +401,8 @@ class _MapScreenState extends State<MapScreen> {
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 constraints: const BoxConstraints(maxWidth: 600),
-                child: Column(
-                  children: [
-                    // Search Input
+                child: _destination == null 
+                  ? // Search Mode
                     Container(
                       decoration: BoxDecoration(
                         color: const Color(0xFF1E1E1E),
@@ -403,128 +442,179 @@ class _MapScreenState extends State<MapScreen> {
                             ),
                         ],
                       ),
-                    ),
-                    
-                    // Search Results Overlay
-                    if (_searchResults.isNotEmpty)
-                      Container(
-                         margin: const EdgeInsets.only(top: 8),
-                         decoration: BoxDecoration(
-                           color: const Color(0xFF1E1E1E),
-                           borderRadius: BorderRadius.circular(12),
-                           boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8)],
-                         ),
-                         constraints: const BoxConstraints(maxHeight: 200),
-                         child: ListView.builder(
-                           shrinkWrap: true,
-                           itemCount: _searchResults.length,
-                           itemBuilder: (context, index) {
-                             final result = _searchResults[index];
-                             final address = result['address']['freeformAddress'] ?? 'Unknown location';
-                             final name = result['poi'] != null ? result['poi']['name'] : address;
-                             
-                             return ListTile(
-                               leading: const Icon(Icons.location_on_outlined, color: Colors.grey),
-                               title: Text(name, style: const TextStyle(color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
-                               subtitle: name != address ? Text(address, style: TextStyle(color: Colors.grey[400], fontSize: 12), maxLines: 1) : null,
-                               onTap: () => _selectSearchResult(result),
-                             );
-                           },
-                         ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // HUD Overlay (Moved Down)
-          Positioned(
-            bottom: 40, // Moved to bottom for cleaner look or just lower top? Let's move to bottom to allow search at top
-            left: 20,
-            right: 20,
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min, // Wrap content suitable for bottom
-                children: [
-                   if (_routeDistance != null) ...[
+                    )
+                  : // Navigation Mode (Turn-by-Turn)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFff791a).withOpacity(0.95),
+                        color: const Color(0xFF1E1E1E), // Dark card
                         borderRadius: BorderRadius.circular(12),
-                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 8)],
+                        boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8)],
+                        border: Border.all(color: const Color(0xFFff791a), width: 1.5), // Orange border
                       ),
                       child: Row(
-                        mainAxisSize: MainAxisSize.min,
                         children: [
-                           const Icon(Icons.directions_car, color: Colors.white, size: 20),
-                           const SizedBox(width: 8),
-                           Text(
-                            'Trip: $_routeDistance',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                          const Icon(Icons.turn_right, color: Colors.white, size: 40), // Placeholder direction
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _currentInstruction ?? "Follow Route",
+                                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 2,
+                                ),
+                                if (_routeDistance != null)
+                                  Text(
+                                    _routeDistance!,
+                                    style: const TextStyle(color: Colors.grey, fontSize: 14),
+                                  ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(width: 12),
-                          Container(width: 1, height: 20, color: Colors.white30),
-                          const SizedBox(width: 4),
-                           GestureDetector(
-                             onTap: () {
+                           // Close/Exit Button
+                           IconButton(
+                             icon: const Icon(Icons.close, color: Colors.grey),
+                             onPressed: () {
                                setState(() {
                                  _routePoints = [];
                                  _destination = null;
                                  _routeDistance = null;
+                                 _currentInstruction = null;
                                  _searchController.clear();
                                });
                              },
-                             child: const Padding(
-                               padding: EdgeInsets.all(4.0),
-                               child: Icon(Icons.close, color: Colors.white, size: 20),
-                             ),
                            ),
                         ],
                       ),
                     ),
-                  ],
+              ),
+            ),
+          ),
+          
+          // Search Results Overlay (Only if not navigating)
+          if (_destination == null && _searchResults.isNotEmpty)
+            Positioned(
+              top: 80, // Below search bar
+              left: 16,
+              right: 16,
+              child: SafeArea(
+                child: Container(
+                   decoration: BoxDecoration(
+                     color: const Color(0xFF1E1E1E),
+                     borderRadius: BorderRadius.circular(12),
+                     boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8)],
+                   ),
+                   constraints: const BoxConstraints(maxWidth: 600, maxHeight: 200),
+                   child: ListView.builder(
+                     shrinkWrap: true,
+                     itemCount: _searchResults.length,
+                     itemBuilder: (context, index) {
+                       final result = _searchResults[index];
+                       final address = result['address']['freeformAddress'] ?? 'Unknown location';
+                       final name = result['poi'] != null ? result['poi']['name'] : address;
+                       
+                       return ListTile(
+                          leading: const Icon(Icons.location_on_outlined, color: Colors.grey),
+                          title: Text(name, style: const TextStyle(color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: name != address ? Text(address, style: TextStyle(color: Colors.grey[400], fontSize: 12), maxLines: 1) : null,
+                          onTap: () => _selectSearchResult(result),
+                       );
+                     },
+                   ),
+                ),
+              ),
+            ),
+
+          // HUD Overlay (Bottom)
+          Positioned(
+            bottom: 40,
+            left: 20,
+            right: 20,
+            child: SafeArea(
+              top: false,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                   // SPEED LIMIT & CURRENT SPEED (New Feature)
+                   Column(
+                     mainAxisSize: MainAxisSize.min,
+                     children: [
+                       // Speed Limit Sign
+                       Container(
+                         width: 50,
+                         height: 60,
+                         decoration: BoxDecoration(
+                           color: Colors.white,
+                           borderRadius: BorderRadius.circular(8),
+                           border: Border.all(color: Colors.black, width: 3),
+                           boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                         ),
+                         child: Column(
+                           mainAxisAlignment: MainAxisAlignment.center,
+                           children: [
+                             const Text('LIMIT', style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold)),
+                             Text(
+                               '$_speedLimit',
+                               style: const TextStyle(color: Colors.black, fontSize: 24, fontWeight: FontWeight.bold),
+                             ),
+                           ],
+                         ),
+                       ),
+                       const SizedBox(height: 8),
+                       // Current Speed
+                       Container(
+                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                         decoration: BoxDecoration(
+                           color: Colors.black.withOpacity(0.8),
+                           borderRadius: BorderRadius.circular(8),
+                         ),
+                         child: Text(
+                           '${_currentSpeed.toInt()} MPH',
+                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                         ),
+                       ),
+                     ],
+                   ),
                    
-                   // Safety Score Card
+                   const Spacer(),
+
+                   // Safety Score Card (Right Side)
                    Container(
                     padding: const EdgeInsets.all(16),
-                    constraints: const BoxConstraints(maxWidth: 400),
+                    constraints: const BoxConstraints(maxWidth: 200), // Smaller width
                     decoration: BoxDecoration(
                       color: const Color(0xFF121212).withOpacity(0.9), // Background Dark
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: const Color(0xFFff791a).withOpacity(0.3)), // Border Orange
                     ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Column( // Vertical Stack for compact right side
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'SAFETY SCORE',
-                              style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              '100',
-                              style: TextStyle(
-                                color: Color(0xFFff791a), // Safety Orange
-                                fontSize: 32,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Icon(
+                        const Icon(
                           Icons.shield,
                           color: Color(0xFFff791a), // Safety Orange
                           size: 32,
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'SCORE',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Text(
+                          '100',
+                          style: TextStyle(
+                            color: Color(0xFFff791a), // Safety Orange
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
