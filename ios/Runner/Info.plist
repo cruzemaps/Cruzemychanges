@@ -5,7 +5,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app needs access to location to show your position on the map.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>This app detects hard braking and crashess.</string>
+	<string>This app detects hard braking and crashes.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
