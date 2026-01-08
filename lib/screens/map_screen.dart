@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // For Haptic Feedback
+import 'package:flutter/foundation.dart'; // For kIsWeb
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -45,7 +46,16 @@ class _MapScreenState extends State<MapScreen> {
 
     _startListening();
     _startLocationUpdates();
+    
+    // Start Polling Incidents every 5 seconds
+    _fetchIncidents();
+    Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted) _fetchIncidents();
+    });
   }
+
+  // Camera State
+  bool _isFollowingUser = true;
 
   Future<void> _startLocationUpdates() async {
     bool serviceEnabled;
@@ -69,10 +79,26 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     const LocationSettings locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 10,
+      accuracy: LocationAccuracy.bestForNavigation, // Optimized for driving
+      distanceFilter: 5, // Update every 5 meters for smoothness
     );
     
+    // 1. Get Immediate Fix (Live Location)
+    try {
+      Position current = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      if (mounted) {
+         setState(() {
+           _currentPosition = LatLng(current.latitude, current.longitude);
+           // Don't accumulate distance for this "jump"
+         });
+         // Snap Camera Immediately
+         _mapController.move(_currentPosition, 17.5);
+      }
+    } catch (e) {
+      debugPrint("Error getting immediate location: $e");
+    }
+
+    // 2. Start Streaming Updates
     _positionStreamSubscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(
       (Position position) {
         final newLatLng = LatLng(position.latitude, position.longitude);
@@ -97,12 +123,10 @@ class _MapScreenState extends State<MapScreen> {
                _accumulatedPenalty += 0.5;
             }
             
-            // RECALCULATE SCORE: 100 - (Penalty / Miles)
-            // Use max(0.1, miles) to avoid divide by zero and allow initial penalties to hurt
+            // RECALCULATE SCORE
             double miles = _totalDistanceMiles < 0.1 ? 0.1 : _totalDistanceMiles;
             double calculatedScore = 100 - (_accumulatedPenalty / miles);
             
-            // Clamp
             if (calculatedScore < 0) calculatedScore = 0;
             if (calculatedScore > 100) calculatedScore = 100;
             
@@ -112,11 +136,7 @@ class _MapScreenState extends State<MapScreen> {
              for (final zone in _highRiskZones) {
                final Distance distance = const Distance();
                final double meterDist = distance.as(LengthUnit.Meter, newLatLng, zone);
-               // If within 500 meters
                if (meterDist < 500) {
-                  // Check if we haven't alerted recently (simple debounce needed in real app)
-                  // For now, just showing visual feedback or could trigger a state flag
-                  // We'll use a local throttler
                   if (_canShowRiskAlert) {
                      _showRiskAlert();
                      _canShowRiskAlert = false;
@@ -126,7 +146,22 @@ class _MapScreenState extends State<MapScreen> {
             }
 
           });
-          _mapController.move(newLatLng, 15.0);
+          
+          // DYNAMIC CAMERA LOGIC
+          if (_isFollowingUser) {
+             // Zoom closer (17.5) for "Real Map" feel
+             // Rotate map to match heading (GPS bearing) if moving
+             double targetZoom = 17.5;
+             double targetRotation = _mapController.camera.rotation;
+             
+             if (speedMph > 2) {
+               // Only rotate if we are actually moving to avoid jitter
+               targetRotation = position.heading;
+             }
+             
+             _mapController.move(newLatLng, targetZoom);
+             _mapController.rotate(targetRotation);
+          }
         }
       },
     );
@@ -150,6 +185,7 @@ class _MapScreenState extends State<MapScreen> {
   
   // Risk Alert State
   bool _canShowRiskAlert = true;
+  List<dynamic> _incidents = [];
 
   // San Antonio High Risk Zones (Lat, Lng)
   final List<LatLng> _highRiskZones = [
@@ -248,7 +284,7 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _updateSpeedLimit() async {
     final lat = _currentPosition.latitude;
     final lon = _currentPosition.longitude;
-    final host = Platform.isAndroid ? '10.0.2.2' : 'localhost';
+    final host = await _getHost();
     
     // Default fallback to null (unknown)
     int? newLimit;
@@ -305,13 +341,13 @@ class _MapScreenState extends State<MapScreen> {
           // Basic summary for distance
           if (data['routes'][0]['summary'] != null) {
               final lengthInMeters = data['routes'][0]['summary']['lengthInMeters'];
-              final km = (lengthInMeters / 1000).toStringAsFixed(1);
+              final miles = (lengthInMeters * 0.000621371).toStringAsFixed(1);
               if (mounted) {
                  // Haptic Heartbeat: Medium Impact for SAFE ROUTE FOUND
                  HapticFeedback.mediumImpact();
                  
                  setState(() {
-                   _routeDistance = "$km km";
+                   _routeDistance = "$miles mi";
                  });
               }
           }
@@ -406,6 +442,13 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
+  Future<String> _getHost() async {
+    // Web safe host check
+    if (kIsWeb) return 'localhost';
+    if (Platform.isAndroid) return '10.0.2.2';
+    return 'localhost';
+  }
+
   Future<void> _triggerCrash(double gForce) async {
     setState(() {
       _crashDetected = true;
@@ -413,8 +456,9 @@ class _MapScreenState extends State<MapScreen> {
 
     // Send to API
     try {
+      final host = await _getHost();
       final response = await http.post(
-        Uri.parse('http://${Platform.isAndroid ? '10.0.2.2' : 'localhost'}:7071/api/telemetry'), 
+        Uri.parse('http://$host:7071/api/telemetry'), 
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'lat': _initialCenter.latitude,
@@ -429,6 +473,111 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  // INCIDENT REPORTING LOGIC
+  void _showReportDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: GlassCard(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("REPORT INCIDENT", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 16),
+              _buildReportOption("CRASH", Icons.car_crash, Colors.red),
+              const SizedBox(height: 8),
+              _buildReportOption("FLAT TIRE", Icons.tire_repair, Colors.orange),
+              const SizedBox(height: 8),
+              _buildReportOption("STOPPED CAR", Icons.warning, Colors.yellow),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text("CANCEL", style: TextStyle(color: Colors.grey)),
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportOption(String label, IconData icon, Color color) {
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).pop(); // Close dialog
+        _submitReport(label);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 12),
+            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _submitReport(String type) async {
+    // Optimistic Update
+    setState(() {
+      _incidents.add({
+        'lat': _initialCenter.latitude,
+        'lon': _initialCenter.longitude,
+        'type': type,
+        'description': 'Reported by user',
+      });
+      
+      // Haptic Feedback
+      HapticFeedback.heavyImpact();
+    });
+
+    try {
+      final host = Platform.isAndroid ? '10.0.2.2' : 'localhost';
+      await http.post(
+        Uri.parse('http://$host:7071/api/report_incident'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'lat': _initialCenter.latitude,
+          'lon': _initialCenter.longitude,
+          'type': type,
+          'description': 'Reported by User',
+        }),
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Incident Reported to Community"), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      debugPrint("Error reporting incident: $e");
+    }
+  }
+
+  Future<void> _fetchIncidents() async {
+    try {
+      final host = await _getHost();
+      final response = await http.get(Uri.parse('http://$host:7071/api/incidents'));
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+           setState(() {
+             _incidents = data['incidents'];
+           });
+        }
+      }
+    } catch (e) {
+      print("Error fetching incidents: $e");
+    }
+  }
+
   @override
   void dispose() {
     _accelerometerSubscription?.cancel();
@@ -438,14 +587,20 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
+    // Note: Removed Scaffold to rely on MainScaffold.
+    // Adjust bottom padding to account for floating GlassNavBar (~100px height)
+    return Stack(
         children: [
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
               initialCenter: _initialCenter,
               initialZoom: 13.0,
+              onPositionChanged: (position, hasGesture) {
+                if (hasGesture) {
+                  setState(() => _isFollowingUser = false);
+                }
+              },
               onTap: (tapPosition, point) {
                 _setDestination(point);
               },
@@ -466,14 +621,19 @@ class _MapScreenState extends State<MapScreen> {
                   color: Colors.red.withOpacity(0.3),
                   borderColor: Colors.red.withOpacity(0.7),
                   borderStrokeWidth: 2,
-                  radius: 500, // ~500 meters visual radius (approximate for pixel/zoom) - flutter_map uses pixels or meters depending on validation. CircleMarker radius is in pixels usually but let's check. 
-                  // Wait, CircleMarker radius is "radius", usually pixels. To map to real-world meters implies using a different layer or dynamic calculation. 
-                  // For simple visualization, 100 logical pixels at high zoom is fine, but might be huge at low zoom. 
-                  // Ideally use a Polygon for specific geofence, but CircleMarker is easy. 
-                  // Let's use useRadiusInMeter = true if available or accepted in this version.
-                  // Checking docs: flutter_map 6+ CircleMarker has 'useRadiusInMeter'.
+                  radius: 500, 
                   useRadiusInMeter: true,
                 )).toList(),
+              ),
+
+              // TRAFFIC FLOW LAYER (Visualizes Congestion Only)
+              TileLayer(
+                // style=relative-delay hides free-flow (green) and shows only slow traffic (orange/red)
+                urlTemplate: 'https://atlas.microsoft.com/traffic/flow/tile/png?api-version=1.0&style=relative-delay&zoom={z}&x={x}&y={y}&subscription-key={subscriptionKey}',
+                additionalOptions: {
+                  'subscriptionKey': azureKey,
+                },
+                userAgentPackageName: 'com.example.cruze_mobile',
               ),
               PolylineLayer(
                 polylines: [
@@ -501,13 +661,42 @@ class _MapScreenState extends State<MapScreen> {
               ),
               MarkerLayer(
                 markers: [
-                   // Risk Zone Icons (Warning Signs)
+                   // High Risk Zone Icons
                    ..._highRiskZones.map((zone) => Marker(
                       point: zone,
                       width: 30,
                       height: 30,
                       child: const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 24),
                    )),
+                   
+                   // INCIDENT MARKERS (Filtered to 1 mile radius)
+                   ..._incidents.where((incident) {
+                      final LatLng incidentPos = LatLng(incident['lat'], incident['lon']);
+                      final Distance distance = const Distance();
+                      // 1 mile = ~1609 meters
+                      return distance.as(LengthUnit.Meter, _currentPosition, incidentPos) <= 1609;
+                   }).map((incident) {
+                      IconData icon = Icons.warning;
+                      Color color = Colors.orange;
+                      if (incident['type'] == 'CRASH') { icon = Icons.car_crash; color = Colors.red; }
+                      if (incident['type'] == 'FLAT TIRE') { icon = Icons.tire_repair; color = Colors.orange; }
+                      if (incident['type'] == 'STOPPED CAR') { icon = Icons.warning; color = Colors.yellow; }
+                      
+                      return Marker(
+                        point: LatLng(incident['lat'], incident['lon']),
+                        width: 40,
+                        height: 40,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.5),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: color, width: 2),
+                          ),
+                          child: Icon(icon, color: color, size: 20),
+                        ),
+                      );
+                   }),
+
                   Marker(
                     point: _currentPosition,
                     width: 40,
@@ -588,15 +777,24 @@ class _MapScreenState extends State<MapScreen> {
                     GlassCard(
                       child: Row(
                         children: [
-                          const Icon(Icons.turn_right, color: Colors.white, size: 40), // Placeholder direction
-                          const SizedBox(width: 16),
+                          // Dynamic Direction Icon (Small)
+                          if (_currentInstruction != null)
+                             Container(
+                               padding: const EdgeInsets.all(8),
+                               decoration: BoxDecoration(
+                                 color: Colors.white.withOpacity(0.1),
+                                 shape: BoxShape.circle,
+                               ),
+                               child: const Icon(Icons.navigation_rounded, color: Color(0xFFff791a), size: 24),
+                             ),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
                                   _currentInstruction ?? "Follow Route",
-                                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 2,
                                 ),
@@ -610,7 +808,7 @@ class _MapScreenState extends State<MapScreen> {
                                 if (_routeDistance != null)
                                   Text(
                                     _routeDistance!,
-                                    style: const TextStyle(color: Colors.grey, fontSize: 14),
+                                    style: const TextStyle(color: Colors.grey, fontSize: 13),
                                   ),
                               ],
                             ),
@@ -618,7 +816,7 @@ class _MapScreenState extends State<MapScreen> {
 
                            // Close/Exit Button
                            IconButton(
-                             icon: const Icon(Icons.close, color: Colors.grey),
+                             icon: const Icon(Icons.close, color: Colors.grey, size: 20),
                              onPressed: () {
                                setState(() {
                                  _routePoints = [];
@@ -664,9 +862,39 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
 
-          // HUD Overlay (Bottom)
+          // Recenter Button
+          if (!_isFollowingUser)
+             Positioned(
+               bottom: 180, 
+               right: 16,
+               child: FloatingActionButton.small(
+                 heroTag: "recenter_fab",
+                 onPressed: () {
+                   setState(() {
+                     _isFollowingUser = true;
+                     _mapController.move(_currentPosition, 17.5);
+                   });
+                 },
+                 backgroundColor: const Color(0xFFff791a),
+                 child: const Icon(Icons.my_location, color: Colors.white),
+               ),
+             ),
+             
+          // Report Incident Button (Bottom Left)
           Positioned(
-            bottom: 40,
+             bottom: 180,
+             left: 16,
+             child: FloatingActionButton.small(
+               heroTag: "report_fab",
+               onPressed: _showReportDialog,
+               backgroundColor: Colors.redAccent,
+               child: const Icon(Icons.report_problem, color: Colors.white),
+             ),
+          ),
+
+          // HUD Overlay (Bottom) - Adjusted position
+          Positioned(
+            bottom: 120, // Increased to clear GlassNavBar
             left: 20,
             right: 20,
             child: SafeArea(
@@ -694,8 +922,8 @@ class _MapScreenState extends State<MapScreen> {
                            children: [
                              Text('LIMIT', style: GoogleFonts.montserrat(color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900)),
                              Text(
-                               '${_speedLimit ?? "--"}',
-                               style: GoogleFonts.montserrat(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w900),
+                                '${_speedLimit ?? "--"}',
+                                style: GoogleFonts.montserrat(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w900),
                              ),
                            ],
                          ),
@@ -795,29 +1023,48 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
         ],
-      ),
-    );
+      );
   }
   // Helper to generate Lane Icons
   List<Widget> _getLaneIcons(String instruction) {
     List<Widget> lanes = [];
     String lower = instruction.toLowerCase();
     
-    // Default: 3 Lanes (Generic Highway)
-    int laneCount = 3;
+    // Default: 2 Lanes for city streets, 3 for highway terms
+    int laneCount = 2;
+    if (lower.contains("exit") || lower.contains("keep") || lower.contains("merge") || lower.contains("highway")) {
+       laneCount = 3;
+    }
+
+    // Explicit Overrides from Text
+    if (lower.contains("1 lane") || lower.contains("single lane") || lower.contains("ramp")) {
+       laneCount = 1;
+    } else if (lower.contains("2 lanes")) {
+       laneCount = 2;
+    } else if (lower.contains("3 lanes")) {
+       laneCount = 3;
+    } else if (lower.contains("4 lanes")) {
+       laneCount = 4;
+    }
     
-    // Determine Recommended Lane Index (0 = Left, 1 = Middle, 2 = Right)
+    // Determine Recommended Lane Index (0 = Left ... N = Right)
     List<int> recommended = [];
     
-    if (lower.contains("left") || lower.contains("merge left")) {
-       recommended = [0]; // Left Lane
-       if (lower.contains("2 lanes")) recommended = [0, 1];
-    } else if (lower.contains("right") || lower.contains("merge right") || lower.contains("exit")) {
-       recommended = [2]; // Right Lane
-       if (lower.contains("2 lanes")) recommended = [1, 2];
+    if (laneCount == 1) {
+       recommended = [0]; // The only lane is the right lane
     } else {
-       // Straight or Keep
-       recommended = [1]; // Middle Lane
+        if (lower.contains("left") || lower.contains("merge left")) {
+           recommended = [0]; // Left Lane
+           if (lower.contains("2 lanes") && laneCount > 2) recommended = [0, 1];
+        } else if (lower.contains("right") || lower.contains("merge right") || lower.contains("exit")) {
+           recommended = [laneCount - 1]; // Right-most Lane
+           if (lower.contains("2 lanes") && laneCount > 2) recommended = [laneCount - 2, laneCount - 1];
+        } else {
+           // Straight or Keep -> Center lanes
+           if (laneCount == 2) recommended = [0, 1]; // Use both? Or just right? Let's say both for "continue"
+           if (laneCount == 3) recommended = [1]; // Middle
+           if (laneCount >= 4) recommended = [1, 2]; // Middle two
+        }
     }
 
     for (int i = 0; i < laneCount; i++) {
@@ -825,21 +1072,30 @@ class _MapScreenState extends State<MapScreen> {
        IconData icon = Icons.arrow_upward_rounded;
        
        if (isActive) {
-          if (lower.contains("left")) icon = Icons.turn_left_rounded;
-          if (lower.contains("right") || lower.contains("exit")) icon = Icons.turn_right_rounded;
+          if (lower.contains("left") && !lower.contains("keep")) icon = Icons.turn_left_rounded;
+          else if ((lower.contains("right") || lower.contains("exit")) && !lower.contains("keep")) icon = Icons.turn_right_rounded;
+          else if (lower.contains("u-turn")) icon = Icons.u_turn_left_rounded;
        }
 
        lanes.add(
          Padding(
-           padding: const EdgeInsets.symmetric(horizontal: 2.0),
-           child: Icon(
-             icon,
-             color: isActive ? Colors.white : Colors.white24,
-             size: 20,
+           padding: const EdgeInsets.symmetric(horizontal: 4.0), // More spacing
+           child: Container(
+             padding: const EdgeInsets.all(4),
+             decoration: isActive ? BoxDecoration(
+               color: Colors.white.withOpacity(0.1),
+               borderRadius: BorderRadius.circular(4),
+               border: Border.all(color: const Color(0xFFff791a).withOpacity(0.5)),
+             ) : null,
+             child: Icon(
+               icon,
+               color: isActive ? const Color(0xFFff791a) : Colors.white24, // Highlight Orange
+               size: 24,
+             ),
            ),
          )
        );
     }
     return lanes;
   }
-}
+} // End of State class

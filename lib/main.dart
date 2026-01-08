@@ -3,6 +3,7 @@ import 'package:cruze_mobile/screens/alerts_screen.dart';
 import 'package:cruze_mobile/screens/login_screen.dart';
 import 'package:cruze_mobile/screens/map_screen.dart';
 import 'package:cruze_mobile/screens/profile_screen.dart';
+import 'package:cruze_mobile/widgets/nav_bar.dart'; // Import custom NavBar
 
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
@@ -40,10 +41,69 @@ class CruzeApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (context) => const LoginScreen(),
-        '/map': (context) => const MapScreen(),
-        '/alerts': (context) => const AlertsScreen(),
-        '/profile': (context) => const ProfileScreen(),
+        '/home': (context) => const MainScaffold(),
       },
+    );
+  }
+}
+
+class MainScaffold extends StatefulWidget {
+  const MainScaffold({super.key});
+
+  @override
+  State<MainScaffold> createState() => _MainScaffoldState();
+}
+
+class _MainScaffoldState extends State<MainScaffold> {
+  int _selectedIndex = 0;
+
+  final List<Widget> _screens = [
+    const MapScreen(),
+    const AlertsScreen(),
+    const ProfileScreen(),
+  ];
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      extendBody: true, // Important for floating nav bar
+      body: Stack(
+        children: [
+          // Background (Global Texture)
+           Container(
+             decoration: const BoxDecoration(
+               gradient: LinearGradient(
+                 begin: Alignment.topLeft,
+                 end: Alignment.bottomRight,
+                 colors: [
+                   Color(0xFF0F0F0F), // Darker charcoal
+                   Color(0xFF1A1A1A), // Lighter charcoal
+                 ],
+               ),
+             ),
+           ),
+           
+           // Screen Content
+          _screens[_selectedIndex],
+
+          // Floating Nav Bar
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: GlassNavBar(
+              selectedIndex: _selectedIndex,
+              onItemSelected: _onItemTapped,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

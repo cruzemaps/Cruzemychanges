@@ -186,6 +186,51 @@ def get_speed_limit_endpoint():
     result = get_speed_limit_data(lat, lon)
     return jsonify(result), 200
 
+# --- INCIDENT REPORTING ---
+INCIDENTS_FILE = "incidents.json"
+
+def load_incidents():
+    if os.path.exists(INCIDENTS_FILE):
+        try:
+            with open(INCIDENTS_FILE, 'r') as f: return json.load(f)
+        except: pass
+    return []
+
+def save_incidents(incidents):
+    with open(INCIDENTS_FILE, 'w') as f: json.dump(incidents, f)
+
+@app.route('/api/report_incident', methods=['POST'])
+def report_incident():
+    data = request.json
+    lat = data.get('lat')
+    lon = data.get('lon')
+    i_type = data.get('type') # crash, flat_tire, stopped
+    description = data.get('description', '')
+    
+    if not lat or not lon or not i_type:
+        return jsonify({"error": "Missing fields"}), 400
+        
+    incidents = load_incidents()
+    new_incident = {
+        "id": random.randint(1000, 9999), # Simple ID
+        "lat": lat,
+        "lon": lon,
+        "type": i_type,
+        "description": description,
+        "timestamp": "Now" # In real app use datetime
+    }
+    
+    incidents.append(new_incident)
+    save_incidents(incidents)
+    
+    print(f"[Incident] New Report: {i_type} at {lat}, {lon}")
+    return jsonify({"status": "success", "id": new_incident["id"]}), 200
+
+@app.route('/api/incidents', methods=['GET'])
+def get_incidents():
+    incidents = load_incidents()
+    return jsonify({"incidents": incidents}), 200
+
 if __name__ == '__main__':
     print("Starting HiveMind Backend (Flask Emulation) on port 7071...")
     # Run on port 7071 to match Azure Functions default
