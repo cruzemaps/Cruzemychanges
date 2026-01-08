@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For Haptic Feedback
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -304,6 +305,9 @@ class _MapScreenState extends State<MapScreen> {
               final lengthInMeters = data['routes'][0]['summary']['lengthInMeters'];
               final km = (lengthInMeters / 1000).toStringAsFixed(1);
               if (mounted) {
+                 // Haptic Heartbeat: Medium Impact for SAFE ROUTE FOUND
+                 HapticFeedback.mediumImpact();
+                 
                  setState(() {
                    _routeDistance = "$km km";
                  });
@@ -387,6 +391,9 @@ class _MapScreenState extends State<MapScreen> {
 
       // Threshold > 15 as per requirements for CRASH
       if (gForce > 15) {
+        // Haptic Heartbeat: Heavy Impact for CRASH
+        HapticFeedback.heavyImpact();
+        
         DateTime now = DateTime.now();
         // Debounce to prevent multiple API calls
         if (_lastShakeTime == null || now.difference(_lastShakeTime!) > const Duration(seconds: 5)) {
