@@ -587,6 +587,7 @@ class _MapScreenState extends State<MapScreen> {
                         children: [
                           const Icon(Icons.turn_right, color: Colors.white, size: 40), // Placeholder direction
                           const SizedBox(width: 16),
+                          Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -610,6 +611,7 @@ class _MapScreenState extends State<MapScreen> {
                                   ),
                               ],
                             ),
+                          ),
                           ),
                            // Close/Exit Button
                            IconButton(
