@@ -4,7 +4,7 @@ import 'package:cruze_mobile/screens/login_screen.dart';
 import 'package:cruze_mobile/screens/map_screen.dart';
 import 'package:cruze_mobile/screens/profile_screen.dart';
 import 'package:cruze_mobile/widgets/nav_bar.dart'; // Import custom NavBar
-
+//hi
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 
