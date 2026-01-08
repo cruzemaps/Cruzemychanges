@@ -10,7 +10,7 @@ import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: "env/.env");
+  await dotenv.load(fileName: ".env");
   runApp(const CruzeApp());
 }
 

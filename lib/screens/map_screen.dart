@@ -80,12 +80,14 @@ class _MapScreenState extends State<MapScreen> {
 
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation, // Optimized for driving
-      distanceFilter: 5, // Update every 5 meters for smoothness
+      distanceFilter: 0, // Update every 0 meters (force updates for testing)
     );
     
     // 1. Get Immediate Fix (Live Location)
     try {
+      debugPrint("Getting initial location fix...");
       Position current = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      debugPrint("Initial location: ${current.latitude}, ${current.longitude}");
       if (mounted) {
          setState(() {
            _currentPosition = LatLng(current.latitude, current.longitude);
@@ -99,8 +101,10 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     // 2. Start Streaming Updates
+    debugPrint("Starting location stream...");
     _positionStreamSubscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(
       (Position position) {
+        debugPrint("Location update received: ${position.latitude}, ${position.longitude} Speed: ${position.speed}");
         final newLatLng = LatLng(position.latitude, position.longitude);
         final speedMph = (position.speed * 2.23694); // Convert m/s to mph
         
@@ -163,6 +167,9 @@ class _MapScreenState extends State<MapScreen> {
              _mapController.rotate(targetRotation);
           }
         }
+      },
+      onError: (e) {
+        debugPrint("Location stream error: $e");
       },
     );
   }
