@@ -77,8 +77,51 @@ class _MapScreenState extends State<MapScreen> {
         
         if (mounted) {
           setState(() {
+            // Track Distance
+            final distance = const Distance();
+            // Calculate distance from last position in miles (1 meter = 0.000621371 miles)
+            final moves = distance.as(LengthUnit.Meter, _currentPosition, newLatLng) * 0.000621371;
+            if (moves > 0.001) { // Filter noise
+                _totalDistanceMiles += moves;
+            }
+
             _currentPosition = newLatLng;
             _currentSpeed = speedMph;
+            
+            // Safety Score Logic: Speeding
+            if (_speedLimit != null && _currentSpeed > (_speedLimit! + 5)) {
+               // Speeding Penalty: +0.5 per tick (approx 1 sec)
+               _accumulatedPenalty += 0.5;
+            }
+            
+            // RECALCULATE SCORE: 100 - (Penalty / Miles)
+            // Use max(0.1, miles) to avoid divide by zero and allow initial penalties to hurt
+            double miles = _totalDistanceMiles < 0.1 ? 0.1 : _totalDistanceMiles;
+            double calculatedScore = 100 - (_accumulatedPenalty / miles);
+            
+            // Clamp
+            if (calculatedScore < 0) calculatedScore = 0;
+            if (calculatedScore > 100) calculatedScore = 100;
+            
+            _safetyScore = calculatedScore;
+
+            // High Risk Zone Alert Logic
+             for (final zone in _highRiskZones) {
+               final Distance distance = const Distance();
+               final double meterDist = distance.as(LengthUnit.Meter, newLatLng, zone);
+               // If within 500 meters
+               if (meterDist < 500) {
+                  // Check if we haven't alerted recently (simple debounce needed in real app)
+                  // For now, just showing visual feedback or could trigger a state flag
+                  // We'll use a local throttler
+                  if (_canShowRiskAlert) {
+                     _showRiskAlert();
+                     _canShowRiskAlert = false;
+                     Timer(const Duration(minutes: 5), () => _canShowRiskAlert = true);
+                  }
+               }
+            }
+
           });
           _mapController.move(newLatLng, 15.0);
         }
@@ -94,17 +137,57 @@ class _MapScreenState extends State<MapScreen> {
   
   // Navigation State
   String? _currentInstruction;
-  int _speedLimit = 45; // Simulated Speed Limit
+  int? _speedLimit; // Real Speed Limit (nullable)
   double _currentSpeed = 0.0;
   
+  // Safety Score
+  double _safetyScore = 100.0;
+  double _totalDistanceMiles = 0.0;
+  double _accumulatedPenalty = 0.0;
+  
+  // Risk Alert State
+  bool _canShowRiskAlert = true;
+
   // San Antonio High Risk Zones (Lat, Lng)
   final List<LatLng> _highRiskZones = [
     const LatLng(29.5547, -98.6630), // Loop 1604 & Bandera Road
+    const LatLng(29.4241, -98.4936), // Alamo Plaza (Testing)
+    const LatLng(29.4260, -98.4861), // E Houston St
     const LatLng(29.4382, -98.6430), // Highway 151 & Loop 410
     const LatLng(29.6003, -98.5983), // Loop 1604 & I-10 North
     const LatLng(29.5223, -98.4972), // Loop 410 & San Pedro Avenue
     const LatLng(29.4911, -98.7030), // Loop 1604 & Culebra Road
   ];
+
+  void _showRiskAlert() {
+     ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+               const Icon(Icons.warning_amber_rounded, color: Colors.white),
+               const SizedBox(width: 10),
+               Expanded(
+                 child: Column(
+                   mainAxisSize: MainAxisSize.min,
+                   crossAxisAlignment: CrossAxisAlignment.start,
+                   children: const [
+                     Text("ENTERING HIGH RISK ZONE", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                     Text("Do not stop. Keep doors locked.", style: TextStyle(fontSize: 12)),
+                   ],
+                 ),
+               ),
+            ],
+          ),
+          backgroundColor: Colors.black,
+          duration: const Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+             side: const BorderSide(color: Colors.red, width: 2),
+             borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+     );
+  }
 
   // ... existing methods ...
 
@@ -158,12 +241,34 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
   
-  // Simulate fetching speed limit based on location (mock for now)
-  void _updateSpeedLimit() {
-    //In a real app, query Azure Maps Search with "returnSpeedLimit=true" or similar
-    setState(() {
-      _speedLimit = 30 + Random().nextInt(40); // Random limit between 30-70 for demo
-    });
+  // Fetch speed limit from our backend which proxies to Azure Maps
+  Future<void> _updateSpeedLimit() async {
+    final lat = _currentPosition.latitude;
+    final lon = _currentPosition.longitude;
+    final host = Platform.isAndroid ? '10.0.2.2' : 'localhost';
+    
+    // Default fallback to null (unknown)
+    int? newLimit;
+
+    try {
+      final uri = Uri.parse('http://$host:7071/api/speed_limit?lat=$lat&lon=$lon');
+      final response = await http.get(uri);
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['limit'] != null && data['limit'] is int) {
+           newLimit = data['limit'];
+        }
+      }
+    } catch (e) {
+      debugPrint("Error fetching speed limit: $e");
+    }
+
+    if (mounted) {
+      setState(() {
+        _speedLimit = newLimit;
+      });
+    }
   }
 
   Future<void> _setDestination(LatLng point) async {
@@ -262,7 +367,25 @@ class _MapScreenState extends State<MapScreen> {
     _accelerometerSubscription = userAccelerometerEventStream().listen((UserAccelerometerEvent event) {
       double gForce = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
       
-      // Threshold > 15 as per requirements
+      // Safety Score Logic: Hard Braking / Cornering (G-Force > 5 but < 15)
+      if (gForce > 5 && gForce < 15) {
+         if (mounted) {
+           setState(() {
+             // Hard Braking Penalty: +5.0 points
+             _accumulatedPenalty += 5.0;
+             
+             // Update Score immediately
+             double miles = _totalDistanceMiles < 0.1 ? 0.1 : _totalDistanceMiles;
+             double calculatedScore = 100 - (_accumulatedPenalty / miles);
+             
+             if (calculatedScore < 0) calculatedScore = 0;
+             if (calculatedScore > 100) calculatedScore = 100;
+             _safetyScore = calculatedScore;
+           });
+         }
+      }
+
+      // Threshold > 15 as per requirements for CRASH
       if (gForce > 15) {
         DateTime now = DateTime.now();
         // Debounce to prevent multiple API calls
@@ -457,7 +580,6 @@ class _MapScreenState extends State<MapScreen> {
                         children: [
                           const Icon(Icons.turn_right, color: Colors.white, size: 40), // Placeholder direction
                           const SizedBox(width: 16),
-                          Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -467,6 +589,13 @@ class _MapScreenState extends State<MapScreen> {
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 2,
                                 ),
+                                if (_currentInstruction != null && _currentInstruction!.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4.0),
+                                    child: Row(
+                                      children: _getLaneIcons(_currentInstruction!),
+                                    ),
+                                  ),
                                 if (_routeDistance != null)
                                   Text(
                                     _routeDistance!,
@@ -559,7 +688,7 @@ class _MapScreenState extends State<MapScreen> {
                            children: [
                              const Text('LIMIT', style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold)),
                              Text(
-                               '$_speedLimit',
+                               '${_speedLimit ?? "--"}',
                                style: const TextStyle(color: Colors.black, fontSize: 24, fontWeight: FontWeight.bold),
                              ),
                            ],
@@ -609,9 +738,9 @@ class _MapScreenState extends State<MapScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const Text(
-                          '100',
-                          style: TextStyle(
+                        Text(
+                          '${_safetyScore.toInt()}',
+                          style: const TextStyle(
                             color: Color(0xFFff791a), // Safety Orange
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -671,5 +800,49 @@ class _MapScreenState extends State<MapScreen> {
         ],
       ),
     );
+  }
+  // Helper to generate Lane Icons
+  List<Widget> _getLaneIcons(String instruction) {
+    List<Widget> lanes = [];
+    String lower = instruction.toLowerCase();
+    
+    // Default: 3 Lanes (Generic Highway)
+    int laneCount = 3;
+    
+    // Determine Recommended Lane Index (0 = Left, 1 = Middle, 2 = Right)
+    List<int> recommended = [];
+    
+    if (lower.contains("left") || lower.contains("merge left")) {
+       recommended = [0]; // Left Lane
+       if (lower.contains("2 lanes")) recommended = [0, 1];
+    } else if (lower.contains("right") || lower.contains("merge right") || lower.contains("exit")) {
+       recommended = [2]; // Right Lane
+       if (lower.contains("2 lanes")) recommended = [1, 2];
+    } else {
+       // Straight or Keep
+       recommended = [1]; // Middle Lane
+    }
+
+    for (int i = 0; i < laneCount; i++) {
+       bool isActive = recommended.contains(i);
+       IconData icon = Icons.arrow_upward_rounded;
+       
+       if (isActive) {
+          if (lower.contains("left")) icon = Icons.turn_left_rounded;
+          if (lower.contains("right") || lower.contains("exit")) icon = Icons.turn_right_rounded;
+       }
+
+       lanes.add(
+         Padding(
+           padding: const EdgeInsets.symmetric(horizontal: 2.0),
+           child: Icon(
+             icon,
+             color: isActive ? Colors.white : Colors.white24,
+             size: 20,
+           ),
+         )
+       );
+    }
+    return lanes;
   }
 }

@@ -96,13 +96,95 @@ def get_route():
     
     # Real Proxy to Azure Maps
     query = f"{start_lat},{start_lon}:{end_lat},{end_lon}"
-    url = f"https://atlas.microsoft.com/route/directions/json?api-version=1.0&query={query}&subscription-key={AZURE_MAPS_KEY}&routeRepresentation=polyline&instructionsType=text"
+    # Adding Truck Constraints (Vertical Slice Requirement)
+    # Standard Semi Dimensions: 2.6m width, 4.1m height, 22m length, 36T weight
+    truck_params = "&travelMode=truck&vehicleWidth=2.6&vehicleHeight=4.1&vehicleLength=22.0&vehicleWeight=36000"
+    
+    # Risk Avoidance (Hackathon Winner Feature)
+    # Avoiding rectangular area covering the mocked "High Risk Zones"
+    # Format: minLon,minLat,maxLon,maxLat
+    # Example Zone: 29.5547, -98.6630 (Bandera) to 29.4241, -98.4936 (Alamo)
+    # We construct a avoidAreas parameter. 
+    # Azure expects: avoidAreas=minLon,minLat,maxLon,maxLat
+    # Let's avoid the "Alamo Plaza" area specifically for the demo:
+    # 29.4230, -98.4950 to 29.4250, -98.4900
+    risk_params = "&avoidAreas=-98.4950,29.4230,-98.4900,29.4250"
+
+    # Changed instructionsType to 'tagged' for better parsing if needed, though we might use text for simple regex.
+    url = f"https://atlas.microsoft.com/route/directions/json?api-version=1.0&query={query}&subscription-key={AZURE_MAPS_KEY}&routeRepresentation=polyline&instructionsType=tagged{truck_params}{risk_params}"
     
     try:
         azure_res = requests.get(url)
         return jsonify(azure_res.json()), azure_res.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# Speed Limit Logic
+def get_speed_limit_data(lat, lon):
+    # Using Search Address Reverse API with returnSpeedLimit=true
+    # This is the standard way to get speed limit for a coordinate
+    base_url = "https://atlas.microsoft.com/search/address/reverse/json"
+    
+    params = {
+        "api-version": "1.0",
+        "subscription-key": AZURE_MAPS_KEY,
+        "query": f"{lat},{lon}",
+        "returnSpeedLimit": "true",
+        "number": 1 # Only need 1 result
+    }
+
+    try:
+        response = requests.get(base_url, params=params)
+        try:
+            data = response.json()
+        except Exception:
+            return {"error": f"JSON Decode Error. Status: {response.status_code}. Body: {response.text[:200]}"}
+        
+        # Parse the speed limit from the response
+        if 'addresses' in data and len(data['addresses']) > 0:
+            address_data = data['addresses'][0]
+            limit_data = address_data.get('speedLimit')
+            
+            if limit_data:
+                # Format is usually "60 km/h" or similar string
+                # Example: "60 KPH"
+                val_str = limit_data.split(' ')[0]
+                unit_str = ""
+                if ' ' in limit_data:
+                    unit_str = limit_data.split(' ')[1]
+                
+                try:
+                    val = int(float(val_str)) # Handle "60.0"
+                    if "KPH" in unit_str.upper() or "KM/H" in unit_str.upper():
+                         # Convert to MPH: 1 KPH = 0.621371 MPH
+                         val_mph = int(val * 0.621371)
+                         return {"limit": val_mph, "unit": "MPH", "original": limit_data}
+                    elif "MPH" in unit_str.upper():
+                         return {"limit": val, "unit": "MPH", "original": limit_data}
+                except:
+                    pass
+                    
+                return {"limit": limit_data, "unit": "RAW", "original": limit_data}
+            else:
+                 # Check if street name is available but no speed limit
+                 street = address_data.get('address', {}).get('streetName', 'Unknown Road')
+                 return {"error": f"Speed limit not available for {street}"}
+        else:
+            return {"error": "Address not found"}
+            
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.route('/api/speed_limit', methods=['GET'])
+def get_speed_limit_endpoint():
+    lat = request.args.get('lat')
+    lon = request.args.get('lon')
+    
+    if not lat or not lon:
+        return jsonify({"error": "Missing lat/lon"}), 400
+        
+    result = get_speed_limit_data(lat, lon)
+    return jsonify(result), 200
 
 if __name__ == '__main__':
     print("Starting HiveMind Backend (Flask Emulation) on port 7071...")
