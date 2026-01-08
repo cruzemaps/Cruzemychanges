@@ -20,7 +20,7 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
 
 SPEC CHECKSUMS:
-  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  FlutterMacOS: 8f6f14fa908a6fb3fba0cd85dbd81ec4b251fb24
   geolocator_apple: ccfb79d5250de3a295f5093cd03e76aa8836a416
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
 

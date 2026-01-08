@@ -612,7 +612,7 @@ class _MapScreenState extends State<MapScreen> {
                               ],
                             ),
                           ),
-                          ),
+
                            // Close/Exit Button
                            IconButton(
                              icon: const Icon(Icons.close, color: Colors.grey),
