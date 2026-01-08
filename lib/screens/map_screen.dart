@@ -11,6 +11,8 @@ import 'dart:convert';
 
 import 'dart:io' show Platform;
 import 'package:geolocator/geolocator.dart';
+import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
+import 'package:cruze_mobile/widgets/glass_card.dart'; // Import GlassCard
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -475,12 +477,26 @@ class _MapScreenState extends State<MapScreen> {
               ),
               PolylineLayer(
                 polylines: [
-                  if (_routePoints.isNotEmpty)
+                  if (_routePoints.isNotEmpty) ...[
+                    // Glow Layer 1 (Outer Blur)
+                    Polyline(
+                      points: _routePoints,
+                      color: const Color(0xFFff791a).withOpacity(0.2),
+                      strokeWidth: 20.0,
+                    ),
+                    // Glow Layer 2 (Inner Blur)
+                    Polyline(
+                      points: _routePoints,
+                      color: const Color(0xFFff791a).withOpacity(0.5),
+                      strokeWidth: 10.0,
+                    ),
+                    // Core Line (Bright)
                     Polyline(
                       points: _routePoints,
                       color: const Color(0xFFff791a), // Safety Orange
                       strokeWidth: 4.0,
                     ),
+                  ],
                 ],
               ),
               MarkerLayer(
@@ -534,13 +550,7 @@ class _MapScreenState extends State<MapScreen> {
                 constraints: const BoxConstraints(maxWidth: 600),
                 child: _destination == null 
                   ? // Search Mode
-                    Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E1E),
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                        border: Border.all(color: Colors.white10),
-                      ),
+                    GlassCard(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -575,14 +585,7 @@ class _MapScreenState extends State<MapScreen> {
                       ),
                     )
                   : // Navigation Mode (Turn-by-Turn)
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E1E), // Dark card
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8)],
-                        border: Border.all(color: const Color(0xFFff791a), width: 1.5), // Orange border
-                      ),
+                    GlassCard(
                       child: Row(
                         children: [
                           const Icon(Icons.turn_right, color: Colors.white, size: 40), // Placeholder direction
@@ -640,13 +643,7 @@ class _MapScreenState extends State<MapScreen> {
               left: 16,
               right: 16,
               child: SafeArea(
-                child: Container(
-                   decoration: BoxDecoration(
-                     color: const Color(0xFF1E1E1E),
-                     borderRadius: BorderRadius.circular(12),
-                     boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8)],
-                   ),
-                   constraints: const BoxConstraints(maxWidth: 600, maxHeight: 200),
+                child: GlassCard(
                    child: ListView.builder(
                      shrinkWrap: true,
                      itemCount: _searchResults.length,
@@ -695,25 +692,21 @@ class _MapScreenState extends State<MapScreen> {
                          child: Column(
                            mainAxisAlignment: MainAxisAlignment.center,
                            children: [
-                             const Text('LIMIT', style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold)),
+                             Text('LIMIT', style: GoogleFonts.montserrat(color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900)),
                              Text(
                                '${_speedLimit ?? "--"}',
-                               style: const TextStyle(color: Colors.black, fontSize: 24, fontWeight: FontWeight.bold),
+                               style: GoogleFonts.montserrat(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w900),
                              ),
                            ],
                          ),
                        ),
                        const SizedBox(height: 8),
                        // Current Speed
-                       Container(
-                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                         decoration: BoxDecoration(
-                           color: Colors.black.withOpacity(0.8),
-                           borderRadius: BorderRadius.circular(8),
-                         ),
+                       GlassCard(
+                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                          child: Text(
                            '${_currentSpeed.toInt()} MPH',
-                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                           style: GoogleFonts.montserrat(color: const Color(0xFFff791a), fontWeight: FontWeight.bold, fontSize: 16),
                          ),
                        ),
                      ],
@@ -722,14 +715,8 @@ class _MapScreenState extends State<MapScreen> {
                    const Spacer(),
 
                    // Safety Score Card (Right Side)
-                   Container(
-                    padding: const EdgeInsets.all(16),
-                    constraints: const BoxConstraints(maxWidth: 200), // Smaller width
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF121212).withOpacity(0.9), // Background Dark
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFff791a).withOpacity(0.3)), // Border Orange
-                    ),
+                   GlassCard(
+                    width: 200,
                     child: Column( // Vertical Stack for compact right side
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -739,12 +726,13 @@ class _MapScreenState extends State<MapScreen> {
                           size: 32,
                         ),
                         const SizedBox(height: 4),
-                        const Text(
-                          'SCORE',
-                          style: TextStyle(
-                            color: Colors.grey,
+                        Text(
+                          'SAFETY SCORE',
+                          style: GoogleFonts.montserrat(
+                            color: const Color(0xFFC0C0C0), // Silver
                             fontSize: 10,
-                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.5,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                         Text(

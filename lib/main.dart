@@ -5,6 +5,7 @@ import 'package:cruze_mobile/screens/map_screen.dart';
 import 'package:cruze_mobile/screens/profile_screen.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
+import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,10 +21,19 @@ class CruzeApp extends StatelessWidget {
     return MaterialApp(
       title: 'Cruze',
       theme: ThemeData(
+        scaffoldBackgroundColor: const Color(0xFF121212), // Deep Matte Charcoal
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFff791a), // Primary Orange
+          seedColor: const Color(0xFFff791a), // International Orange
+          primary: const Color(0xFFff791a),
+          secondary: const Color(0xFFD4AF37), // Metallic Gold
+          surface: const Color(0xFF121212),
           brightness: Brightness.dark,
-          surface: const Color(0xFF121212), // Background Dark
+        ),
+        textTheme: GoogleFonts.montserratTextTheme(
+          ThemeData.dark().textTheme.apply(
+            bodyColor: Colors.white,
+            displayColor: const Color(0xFFC0C0C0), // Silver headers
+          ),
         ),
         useMaterial3: true,
       ),
