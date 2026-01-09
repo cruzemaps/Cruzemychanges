@@ -85,7 +85,7 @@ class ProfileScreen extends StatelessWidget {
                         ),
                         // Rank Badge
                         Positioned(
-                          bottom: 0,
+                          bottom: -10, // Moved down slightly to reduce overlap with face
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                             decoration: BoxDecoration(
@@ -141,7 +141,7 @@ class ProfileScreen extends StatelessWidget {
                         Expanded(
                           child: _buildStatItem("SAFETY SCORE", "98", primaryColor, suffix: "/100"),
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 24), // Increased spacing
                         Expanded(
                           child: _buildStatItem("WEEKLY MILES", "1,240", Colors.white, suffix: " mi"),
                         ),
@@ -153,7 +153,7 @@ class ProfileScreen extends StatelessWidget {
                         Expanded(
                           child: _buildStatItem("HOURS LOGGED", "38.5", Colors.white, suffix: " hrs"),
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 24), // Increased spacing
                         Expanded(
                           child: _buildStatItem("RANKING", "#4", goldColor, suffix: " in Hub"),
                         ),
@@ -173,7 +173,7 @@ class ProfileScreen extends StatelessWidget {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text("ASSIGNED VEHICLE", style: GoogleFonts.outfit(color: Colors.white54, fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                                Icon(Icons.directions_car, color: primaryColor, size: 18),
+                                const Icon(Icons.directions_car, color: primaryColor, size: 18),
                               ],
                             ),
                           ),

@@ -10,10 +10,12 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-import 'dart:io' show Platform;
+// import 'dart:io' show Platform; // REMOVED for Web Compatibility
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 import 'package:cruze_mobile/widgets/glass_card.dart'; // Import GlassCard
+import 'package:cruze_mobile/services/safety_service.dart'; // Import SafetyService
+import 'package:cruze_mobile/services/navigation_service.dart'; // Import NavigationService
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -80,7 +82,7 @@ class _MapScreenState extends State<MapScreen> {
 
     const LocationSettings locationSettings = LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation, // Optimized for driving
-      distanceFilter: 0, // Update every 0 meters (force updates for testing)
+      distanceFilter: 5, // Update every 5 meters (Reduces jitter/lag)
     );
     
     // 1. Get Immediate Fix (Live Location)
@@ -111,11 +113,11 @@ class _MapScreenState extends State<MapScreen> {
         if (mounted) {
           setState(() {
             // Track Distance
-            final distance = const Distance();
+            const distance = Distance();
             // Calculate distance from last position in miles (1 meter = 0.000621371 miles)
             final moves = distance.as(LengthUnit.Meter, _currentPosition, newLatLng) * 0.000621371;
             if (moves > 0.001) { // Filter noise
-                _totalDistanceMiles += moves;
+                SafetyService.instance.updateDistance(moves);
             }
 
             _currentPosition = newLatLng;
@@ -124,21 +126,20 @@ class _MapScreenState extends State<MapScreen> {
             // Safety Score Logic: Speeding
             if (_speedLimit != null && _currentSpeed > (_speedLimit! + 5)) {
                // Speeding Penalty: +0.5 per tick (approx 1 sec)
-               _accumulatedPenalty += 0.5;
+               // Only record if we haven't flooded the events - logic handled by service or simple throttle?
+               // For now, just update the score silently or with a "Speeding" event?
+               // Let's add a silent penalty to the service implementation if we wanted, 
+               // but for now let's just trigger a "Speeding" event occasionally or just add penalty.
+               // For this refactor, we'll just add the penalty directly via a helper or direct, 
+               // but recordEvent is better. Let's make it a small penalty.
+               // Actually, let's throttle this so we don't look like we are spamming.
+               // Simplified: Just add penalty logic to service if we want, or call recordEvent.
+               SafetyService.instance.recordEvent("Speeding", "Over limit by ${_currentSpeed.toInt() - _speedLimit!} mph", 0.5);
             }
-            
-            // RECALCULATE SCORE
-            double miles = _totalDistanceMiles < 0.1 ? 0.1 : _totalDistanceMiles;
-            double calculatedScore = 100 - (_accumulatedPenalty / miles);
-            
-            if (calculatedScore < 0) calculatedScore = 0;
-            if (calculatedScore > 100) calculatedScore = 100;
-            
-            _safetyScore = calculatedScore;
 
             // High Risk Zone Alert Logic
              for (final zone in _highRiskZones) {
-               final Distance distance = const Distance();
+               const Distance distance = Distance();
                final double meterDist = distance.as(LengthUnit.Meter, newLatLng, zone);
                if (meterDist < 500) {
                   if (_canShowRiskAlert) {
@@ -185,10 +186,10 @@ class _MapScreenState extends State<MapScreen> {
   int? _speedLimit; // Real Speed Limit (nullable)
   double _currentSpeed = 0.0;
   
-  // Safety Score
-  double _safetyScore = 100.0;
-  double _totalDistanceMiles = 0.0;
-  double _accumulatedPenalty = 0.0;
+  // Safety Score - MOVED TO SERVICE
+  // double _safetyScore = 100.0;
+  // double _totalDistanceMiles = 0.0;
+  // double _accumulatedPenalty = 0.0;
   
   // Risk Alert State
   bool _canShowRiskAlert = true;
@@ -208,15 +209,15 @@ class _MapScreenState extends State<MapScreen> {
   void _showRiskAlert() {
      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Row(
+          content: const Row(
             children: [
-               const Icon(Icons.warning_amber_rounded, color: Colors.white),
-               const SizedBox(width: 10),
+               Icon(Icons.warning_amber_rounded, color: Colors.white),
+               SizedBox(width: 10),
                Expanded(
                  child: Column(
                    mainAxisSize: MainAxisSize.min,
                    crossAxisAlignment: CrossAxisAlignment.start,
-                   children: const [
+                   children: [
                      Text("ENTERING HIGH RISK ZONE", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
                      Text("Do not stop. Keep doors locked.", style: TextStyle(fontSize: 12)),
                    ],
@@ -277,12 +278,16 @@ class _MapScreenState extends State<MapScreen> {
     final position = result['position'];
     final point = LatLng(position['lat'], position['lon']);
     
-    _mapController.move(point, 15.0);
+    // "Pan In" Effect: Smooth transition to destination
+    // We don't snap immediately; we let the move animation handle it
+    _mapController.move(point, 17.5); 
+    
     _setDestination(point);
     
     setState(() {
       _searchResults = [];
       _searchController.text = result['address']['freeformAddress'] ?? '';
+      _isFollowingUser = true; // Lock camera to navigation mode
       FocusScope.of(context).unfocus(); // Hide keyboard
     });
   }
@@ -418,20 +423,7 @@ class _MapScreenState extends State<MapScreen> {
       
       // Safety Score Logic: Hard Braking / Cornering (G-Force > 5 but < 15)
       if (gForce > 5 && gForce < 15) {
-         if (mounted) {
-           setState(() {
-             // Hard Braking Penalty: +5.0 points
-             _accumulatedPenalty += 5.0;
-             
-             // Update Score immediately
-             double miles = _totalDistanceMiles < 0.1 ? 0.1 : _totalDistanceMiles;
-             double calculatedScore = 100 - (_accumulatedPenalty / miles);
-             
-             if (calculatedScore < 0) calculatedScore = 0;
-             if (calculatedScore > 100) calculatedScore = 100;
-             _safetyScore = calculatedScore;
-           });
-         }
+         SafetyService.instance.recordEvent("Hard Braking", "G-Force: ${gForce.toStringAsFixed(1)}g", 5.0);
       }
 
       // Threshold > 15 as per requirements for CRASH
@@ -452,7 +444,7 @@ class _MapScreenState extends State<MapScreen> {
   Future<String> _getHost() async {
     // Web safe host check
     if (kIsWeb) return 'localhost';
-    if (Platform.isAndroid) return '10.0.2.2';
+    if (defaultTargetPlatform == TargetPlatform.android) return '10.0.2.2';
     return 'localhost';
   }
 
@@ -548,7 +540,7 @@ class _MapScreenState extends State<MapScreen> {
     });
 
     try {
-      final host = Platform.isAndroid ? '10.0.2.2' : 'localhost';
+      final host = defaultTargetPlatform == TargetPlatform.android ? '10.0.2.2' : 'localhost';
       await http.post(
         Uri.parse('http://$host:7071/api/report_incident'),
         headers: {'Content-Type': 'application/json'},
@@ -559,9 +551,11 @@ class _MapScreenState extends State<MapScreen> {
           'description': 'Reported by User',
         }),
       );
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Incident Reported to Community"), backgroundColor: Colors.green),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Incident Reported to Community"), backgroundColor: Colors.green),
+        );
+      }
     } catch (e) {
       debugPrint("Error reporting incident: $e");
     }
@@ -581,15 +575,32 @@ class _MapScreenState extends State<MapScreen> {
         }
       }
     } catch (e) {
-      print("Error fetching incidents: $e");
+      debugPrint("Error fetching incidents: $e");
     }
   }
-
   @override
   void dispose() {
     _accelerometerSubscription?.cancel();
     _positionStreamSubscription?.cancel();
     super.dispose();
+  }
+
+  // --- END NAVIGATION LOGIC ---
+
+  void _startDriveMode() {
+    NavigationService.instance.startNavigation();
+    setState(() {
+      _isFollowingUser = true;
+    });
+    // Lock Camera
+    _mapController.move(_currentPosition, 18.0);
+  }
+
+  void _endDriveMode() {
+     NavigationService.instance.stopNavigation();
+     setState(() {
+       _routePoints = []; // Clear Route (Optional)
+     });
   }
 
   @override
@@ -633,15 +644,7 @@ class _MapScreenState extends State<MapScreen> {
                 )).toList(),
               ),
 
-              // TRAFFIC FLOW LAYER (Visualizes Congestion Only)
-              TileLayer(
-                // style=relative-delay hides free-flow (green) and shows only slow traffic (orange/red)
-                urlTemplate: 'https://atlas.microsoft.com/traffic/flow/tile/png?api-version=1.0&style=relative-delay&zoom={z}&x={x}&y={y}&subscription-key={subscriptionKey}',
-                additionalOptions: {
-                  'subscriptionKey': azureKey,
-                },
-                userAgentPackageName: 'com.example.cruze_mobile',
-              ),
+
               PolylineLayer(
                 polylines: [
                   if (_routePoints.isNotEmpty) ...[
@@ -679,7 +682,7 @@ class _MapScreenState extends State<MapScreen> {
                    // INCIDENT MARKERS (Filtered to 1 mile radius)
                    ..._incidents.where((incident) {
                       final LatLng incidentPos = LatLng(incident['lat'], incident['lon']);
-                      final Distance distance = const Distance();
+                      const Distance distance = Distance();
                       // 1 mile = ~1609 meters
                       return distance.as(LengthUnit.Meter, _currentPosition, incidentPos) <= 1609;
                    }).map((incident) {
@@ -735,113 +738,194 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ],
           ),
-          // Search Bar OR Instruction Banner
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                constraints: const BoxConstraints(maxWidth: 600),
-                child: _destination == null 
-                  ? // Search Mode
-                    GlassCard(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TextField(
-                            controller: _searchController,
-                            onChanged: _onSearchChanged,
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: 'Search destination...',
-                              hintStyle: TextStyle(color: Colors.grey[600]),
-                              prefixIcon: const Icon(Icons.search, color: Color(0xFFff791a)),
-                              suffixIcon: _searchController.text.isNotEmpty
-                                  ? IconButton(
-                                      icon: const Icon(Icons.clear, color: Colors.grey),
-                                      onPressed: () {
-                                        _searchController.clear();
-                                        _onSearchChanged('');
-                                      },
-                                    )
-                                  : null,
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          
+           // Start Button (ValueListenable)
+           ValueListenableBuilder<bool>(
+             valueListenable: NavigationService.instance.isNavigating,
+             builder: (context, isNavigating, child) {
+               if (_routePoints.isNotEmpty && !isNavigating) {
+                  return Positioned(
+                     bottom: 120, // Clear Nav Bar
+                     left: 20, 
+                     right: 20,
+                     child: Column(
+                       children: [
+                          GlassCard(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                children: [
+                                  _buildRouteStat(Icons.timer, (_routeDistance != null && _routeDistance!.contains("mi")) ? "12 min" : "--"), 
+                                  _buildRouteStat(Icons.directions_car, _routeDistance ?? "--"),
+                                ],
+                              ),
                             ),
                           ),
-                          if (_isSearching)
-                            const LinearProgressIndicator(
-                              color: Color(0xFFff791a),
-                              backgroundColor: Colors.transparent,
-                              minHeight: 2,
+                          const SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: _startDriveMode,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFff791a), // Safety Orange
+                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                              elevation: 8,
+                              shadowColor: const Color(0xFFff791a).withOpacity(0.5),
                             ),
-                        ],
-                      ),
-                    )
-                  : // Navigation Mode (Turn-by-Turn)
-                    GlassCard(
-                      child: Row(
-                        children: [
-                          // Dynamic Direction Icon (Small)
-                          if (_currentInstruction != null)
-                             Container(
-                               padding: const EdgeInsets.all(8),
-                               decoration: BoxDecoration(
-                                 color: Colors.white.withOpacity(0.1),
-                                 shape: BoxShape.circle,
-                               ),
-                               child: const Icon(Icons.navigation_rounded, color: Color(0xFFff791a), size: 24),
-                             ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
+                                const Icon(Icons.navigation, color: Colors.white),
+                                const SizedBox(width: 8),
                                 Text(
-                                  _currentInstruction ?? "Follow Route",
-                                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 2,
+                                  "START NAVIGATION", 
+                                  style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)
                                 ),
-                                if (_currentInstruction != null && _currentInstruction!.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 4.0),
-                                    child: Row(
-                                      children: _getLaneIcons(_currentInstruction!),
-                                    ),
-                                  ),
-                                if (_routeDistance != null)
-                                  Text(
-                                    _routeDistance!,
-                                    style: const TextStyle(color: Colors.grey, fontSize: 13),
-                                  ),
                               ],
                             ),
                           ),
+                       ],
+                     ),
+                  );
+               }
+               return const SizedBox.shrink();
+             },
+           ),
 
-                           // Close/Exit Button
-                           IconButton(
-                             icon: const Icon(Icons.close, color: Colors.grey, size: 20),
-                             onPressed: () {
-                               setState(() {
-                                 _routePoints = [];
-                                 _destination = null;
-                                 _routeDistance = null;
-                                 _currentInstruction = null;
-                                 _searchController.clear();
-                               });
-                             },
-                           ),
-                        ],
-                      ),
-                    ),
-              ),
-            ),
-          ),
+           // End Trip Button (ValueListenable)
+           ValueListenableBuilder<bool>(
+             valueListenable: NavigationService.instance.isNavigating,
+             builder: (context, isNavigating, child) {
+                if (isNavigating) {
+                   return Positioned(
+                     bottom: 40, 
+                     left: 0,
+                     right: 0,
+                     child: Center(
+                       child: FloatingActionButton.extended(
+                         onPressed: _endDriveMode,
+                         backgroundColor: Colors.redAccent,
+                         icon: const Icon(Icons.close, color: Colors.white),
+                         label: Text("END TRIP", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.white)),
+                       ),
+                     ),
+                   );
+                }
+                return const SizedBox.shrink();
+             },
+           ),
+
+           // Search Bar (Hidden in Drive Mode)
+           ValueListenableBuilder<bool>(
+             valueListenable: NavigationService.instance.isNavigating,
+             builder: (context, isNavigating, child) {
+               return AnimatedPositioned(
+                 duration: const Duration(milliseconds: 300),
+                 curve: Curves.easeInOut,
+                 top: isNavigating ? -150 : 0, // Slide up to hide
+                 left: 0,
+                 right: 0,
+                 child: SafeArea( 
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: _destination == null 
+                      ? // Search Mode
+                        GlassCard(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextField(
+                                controller: _searchController,
+                                onChanged: _onSearchChanged,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: InputDecoration(
+                                  hintText: 'Search destination...',
+                                  hintStyle: TextStyle(color: Colors.grey[600]),
+                                  prefixIcon: const Icon(Icons.search, color: Color(0xFFff791a)),
+                                  suffixIcon: _searchController.text.isNotEmpty
+                                      ? IconButton(
+                                          icon: const Icon(Icons.clear, color: Colors.grey),
+                                          onPressed: () {
+                                            _searchController.clear();
+                                            _onSearchChanged('');
+                                          },
+                                        )
+                                      : null,
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                ),
+                              ),
+                              if (_isSearching)
+                                const LinearProgressIndicator(
+                                  color: Color(0xFFff791a),
+                                  backgroundColor: Colors.transparent,
+                                  minHeight: 2,
+                                ),
+                            ],
+                          ),
+                        )
+                      : // Navigation Mode (Turn-by-Turn)
+                        GlassCard(
+                          child: Row(
+                            children: [
+                              // Dynamic Direction Icon (Small)
+                              if (_currentInstruction != null)
+                                 Container(
+                                   padding: const EdgeInsets.all(8),
+                                   decoration: BoxDecoration(
+                                     color: Colors.white.withOpacity(0.1),
+                                     shape: BoxShape.circle,
+                                   ),
+                                   child: const Icon(Icons.navigation_rounded, color: Color(0xFFff791a), size: 24),
+                                 ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [ 
+                                    Text(
+                                      _currentInstruction ?? "Follow Route",
+                                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 2,
+                                    ),
+                                    if (_currentInstruction != null && _currentInstruction!.isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4.0),
+                                        child: Row(
+                                           children: _getLaneIcons(_currentInstruction!),
+                                        ),
+                                      ),
+                                    if (_routeDistance != null)
+                                      Text(
+                                        _routeDistance!,
+                                        style: const TextStyle(color: Colors.grey, fontSize: 13),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                             IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white54),
+                                onPressed: () {
+                                  _setDestination(const LatLng(0,0)); // Clear dest
+                                  setState(() {
+                                     _destination = null;
+                                     _routePoints = [];
+                                     _isFollowingUser = true;
+                                  });
+                                },
+                             )
+                            ],
+                          ),
+                        ),
+                  ),
+                 ),
+               );
+             },
+           ),
           
-          // Search Results Overlay (Only if not navigating)
+          // Search Results Overlay
           if (_destination == null && _searchResults.isNotEmpty)
             Positioned(
               top: 80, // Below search bar
@@ -872,9 +956,9 @@ class _MapScreenState extends State<MapScreen> {
           // Recenter Button
           if (!_isFollowingUser)
              Positioned(
-               bottom: 180, 
+               bottom: 180, // Moved up to match Report button (Symmetry) & Clear HUD
                right: 16,
-               child: FloatingActionButton.small(
+               child: FloatingActionButton(
                  heroTag: "recenter_fab",
                  onPressed: () {
                    setState(() {
@@ -889,9 +973,9 @@ class _MapScreenState extends State<MapScreen> {
              
           // Report Incident Button (Bottom Left)
           Positioned(
-             bottom: 180,
+             bottom: 180, // Moved up to clear HUD
              left: 16,
-             child: FloatingActionButton.small(
+             child: FloatingActionButton(
                heroTag: "report_fab",
                onPressed: _showReportDialog,
                backgroundColor: Colors.redAccent,
@@ -899,9 +983,9 @@ class _MapScreenState extends State<MapScreen> {
              ),
           ),
 
-          // HUD Overlay (Bottom) - Adjusted position
+          // HUD Overlay (Bottom)
           Positioned(
-            bottom: 120, // Increased to clear GlassNavBar
+            bottom: 120, 
             left: 20,
             right: 20,
             child: SafeArea(
@@ -910,11 +994,10 @@ class _MapScreenState extends State<MapScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                   // SPEED LIMIT & CURRENT SPEED (New Feature)
+                   // SPEED LIMIT & CURRENT SPEED
                    Column(
                      mainAxisSize: MainAxisSize.min,
                      children: [
-                       // Speed Limit Sign
                        Container(
                          width: 50,
                          height: 60,
@@ -936,7 +1019,6 @@ class _MapScreenState extends State<MapScreen> {
                          ),
                        ),
                        const SizedBox(height: 8),
-                       // Current Speed
                        GlassCard(
                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                          child: Text(
@@ -946,41 +1028,6 @@ class _MapScreenState extends State<MapScreen> {
                        ),
                      ],
                    ),
-                   
-                   const Spacer(),
-
-                   // Safety Score Card (Right Side)
-                   GlassCard(
-                    width: 200,
-                    child: Column( // Vertical Stack for compact right side
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.shield,
-                          color: Color(0xFFff791a), // Safety Orange
-                          size: 32,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'SAFETY SCORE',
-                          style: GoogleFonts.montserrat(
-                            color: const Color(0xFFC0C0C0), // Silver
-                            fontSize: 10,
-                            letterSpacing: 1.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          '${_safetyScore.toInt()}',
-                          style: const TextStyle(
-                            color: Color(0xFFff791a), // Safety Orange
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -1032,6 +1079,20 @@ class _MapScreenState extends State<MapScreen> {
         ],
       );
   }
+  // Helper for Route Stats
+  Widget _buildRouteStat(IconData icon, String label) {
+    return Row(
+      children: [
+        Icon(icon, color: const Color(0xFFff791a), size: 20),
+        const SizedBox(width: 8),
+        Text(
+          label, 
+          style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)
+        ),
+      ],
+    );
+  }
+
   // Helper to generate Lane Icons
   List<Widget> _getLaneIcons(String instruction) {
     List<Widget> lanes = [];
@@ -1079,9 +1140,13 @@ class _MapScreenState extends State<MapScreen> {
        IconData icon = Icons.arrow_upward_rounded;
        
        if (isActive) {
-          if (lower.contains("left") && !lower.contains("keep")) icon = Icons.turn_left_rounded;
-          else if ((lower.contains("right") || lower.contains("exit")) && !lower.contains("keep")) icon = Icons.turn_right_rounded;
-          else if (lower.contains("u-turn")) icon = Icons.u_turn_left_rounded;
+          if (lower.contains("left") && !lower.contains("keep")) {
+            icon = Icons.turn_left_rounded;
+          } else if ((lower.contains("right") || lower.contains("exit")) && !lower.contains("keep")) {
+            icon = Icons.turn_right_rounded;
+          } else if (lower.contains("u-turn")) {
+            icon = Icons.u_turn_left_rounded;
+          }
        }
 
        lanes.add(

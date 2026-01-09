@@ -4,6 +4,7 @@ import 'package:cruze_mobile/screens/login_screen.dart';
 import 'package:cruze_mobile/screens/map_screen.dart';
 import 'package:cruze_mobile/screens/profile_screen.dart';
 import 'package:cruze_mobile/widgets/nav_bar.dart'; // Import custom NavBar
+import 'package:cruze_mobile/services/navigation_service.dart'; // Import NavigationService
 //hi
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
@@ -21,6 +22,10 @@ class CruzeApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Cruze',
+      // ENFORCE BOUNCING SCROLL PHYSICS GLOBALLY (Better Touch Feel)
+      scrollBehavior: const MaterialScrollBehavior().copyWith(
+        physics: const BouncingScrollPhysics(),
+      ),
       theme: ThemeData(
         scaffoldBackgroundColor: const Color(0xFF121212), // Deep Matte Charcoal
         colorScheme: ColorScheme.fromSeed(
@@ -92,15 +97,22 @@ class _MainScaffoldState extends State<MainScaffold> {
            // Screen Content
           _screens[_selectedIndex],
 
-          // Floating Nav Bar
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: GlassNavBar(
-              selectedIndex: _selectedIndex,
-              onItemSelected: _onItemTapped,
-            ),
+          // Floating Nav Bar (Hidden in Drive Mode)
+          ValueListenableBuilder<bool>(
+            valueListenable: NavigationService.instance.isNavigating,
+            builder: (context, isNavigating, child) {
+              return AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                bottom: isNavigating ? -100 : 0, // Slide off-screen
+                left: 0,
+                right: 0,
+                child: GlassNavBar(
+                  selectedIndex: _selectedIndex,
+                  onItemSelected: _onItemTapped,
+                ),
+              );
+            },
           ),
         ],
       ),

@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:cruze_mobile/widgets/glass_card.dart'; // Import GlassCard
+import 'package:flutter/foundation.dart'; // For defaultTargetPlatform
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -37,7 +38,10 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     final String endpoint = _isLogin ? 'login' : 'signup';
-    final String baseUrl = 'http://127.0.0.1:7071/api'; 
+    // Use defaultTargetPlatform for Web support (dart:io breaks on web)
+    final String baseUrl = defaultTargetPlatform == TargetPlatform.android 
+        ? 'http://10.0.2.2:7071/api' 
+        : 'http://127.0.0.1:7071/api'; 
     
     try {
       final response = await http.post(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cruze_mobile/widgets/glass_card.dart'; // Ensure GlassCard is imported
+import 'package:cruze_mobile/services/safety_service.dart'; // Import SafetyService
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
@@ -41,10 +42,41 @@ class _AlertsScreenState extends State<AlertsScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 100), // Bottom padding for content above Nav
                 children: [
+                  // DRIVER SCORECARD SECTION
+                  _buildSafetyScorecard(),
+                  
+                  const SizedBox(height: 24),
+
                    // TODAY Section
                   _buildSectionHeader('TODAY'),
                   const SizedBox(height: 16),
                   
+                  // Live Events from Service
+                  ValueListenableBuilder<List<SafetyEvent>>(
+                    valueListenable: SafetyService.instance.events,
+                    builder: (context, events, child) {
+                      return Column(
+                        children: events.map((event) {
+                          return Column(
+                            children: [
+                              _buildAlertCard(
+                                icon: Icons.warning_amber_rounded,
+                                iconColor: Colors.redAccent,
+                                title: event.title,
+                                subtitle: event.description,
+                                time: "${event.timestamp.hour}:${event.timestamp.minute.toString().padLeft(2, '0')}",
+                                statusWidget: _buildStatusChip('-${event.penalty} pts', Colors.red),
+                                isHighlight: true,
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                          );
+                        }).toList(),
+                      );
+                    },
+                  ),
+                  
+                  // Fleet Alerts (Static)
                   _buildAlertCard(
                     icon: Icons.warning_amber_rounded,
                     iconColor: primaryColor,
@@ -52,7 +84,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     subtitle: 'Truck #402 • Route 66, Near Exit 4',
                     time: '10:42 AM',
                     statusWidget: _buildStatusChip('High Priority', Colors.red),
-                    isHighlight: true,
+                    isHighlight: false, // Removed highlight to emphasize driver alerts
                   ),
                   const SizedBox(height: 16),
                   
@@ -115,6 +147,96 @@ class _AlertsScreenState extends State<AlertsScreen> {
     );
   }
 
+  Widget _buildSafetyScorecard() {
+    return ValueListenableBuilder<double>(
+      valueListenable: SafetyService.instance.safetyScore,
+      builder: (context, score, child) {
+        // Evaluate Score Color
+        Color scoreColor = Colors.green;
+        if (score < 90) scoreColor = Colors.orange;
+        if (score < 70) scoreColor = Colors.red;
+
+        return GlassCard(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+               Row(
+                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                 children: [
+                   Column(
+                     crossAxisAlignment: CrossAxisAlignment.start,
+                     children: [
+                       Text(
+                         "YOUR SAFETY SCORE",
+                         style: GoogleFonts.outfit(
+                           color: Colors.white54,
+                           fontSize: 12,
+                           letterSpacing: 2.0,
+                           fontWeight: FontWeight.bold,
+                         ),
+                       ),
+                       const SizedBox(height: 8),
+                       Text(
+                         score.toInt().toString(),
+                         style: GoogleFonts.outfit(
+                           color: scoreColor,
+                           fontSize: 64,
+                           fontWeight: FontWeight.bold,
+                         ),
+                       ),
+                     ],
+                   ),
+                   // Progress Circle
+                   SizedBox(
+                     height: 100,
+                     width: 100,
+                     child: Stack(
+                       fit: StackFit.expand,
+                       children: [
+                         CircularProgressIndicator(
+                           value: score / 100,
+                           strokeWidth: 10,
+                           backgroundColor: Colors.white10,
+                           valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
+                         ),
+                         Center(
+                           child: Icon(
+                             score > 80 ? Icons.verified_user : Icons.warning_rounded,
+                             color: scoreColor,
+                             size: 40,
+                           ),
+                         ),
+                       ],
+                     ),
+                   ),
+                 ],
+               ),
+               const SizedBox(height: 16),
+               const Divider(color: Colors.white10),
+               const SizedBox(height: 16),
+               Row(
+                 mainAxisAlignment: MainAxisAlignment.spaceAround,
+                 children: [
+                   _buildStatCompact("Trip Miles", "${SafetyService.instance.totalDistanceMiles.toStringAsFixed(1)} mi"),
+                   _buildStatCompact("Total Penalties", "-${SafetyService.instance.accumulatedPenalty} pts"),
+                 ],
+               ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatCompact(String label, String value) {
+    return Column(
+      children: [
+        Text(value, style: GoogleFonts.outfit(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(label, style: GoogleFonts.inter(color: Colors.white54, fontSize: 12)),
+      ],
+    );
+  }
+
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 60, 20, 16), // Top padding for status bar
@@ -122,7 +244,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
-            'Fleet Alerts',
+            'Safety & Alerts', // Renamed header
             style: GoogleFonts.outfit( // Using Outfit for headers
               fontSize: 28,
               fontWeight: FontWeight.bold,

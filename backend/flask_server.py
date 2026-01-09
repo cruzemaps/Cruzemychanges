@@ -12,12 +12,66 @@ app = Flask(__name__)
 CORS(app)
 
 # --- CONFIGURATION (Borrowed from function_app.py) ---
+from dotenv import load_dotenv
+load_dotenv() # Load .env file
+
 AZURE_MAPS_KEY = os.environ.get("AZURE_MAPS_KEY", "REDACTED_AZURE_MAPS_KEY")
+
+# Cosmos DB Configuration
+COSMOS_CONNECTION_STRING = os.environ.get("COSMOS_CONNECTION_STRING")
+if COSMOS_CONNECTION_STRING:
+    print("✅ COSMOS DB ENABLED: Connection String Found")
+else:
+    print("⚠️ COSMOS DB DISABLED: Connection String Missing (Using Local Files)")
+
+DATABASE_NAME = "cruze_db"
+
+def get_container(container_name):
+    if not COSMOS_CONNECTION_STRING:
+        return None
+    try:
+        from azure.cosmos import CosmosClient, PartitionKey
+        client = CosmosClient.from_connection_string(COSMOS_CONNECTION_STRING)
+        database = client.create_database_if_not_exists(id=DATABASE_NAME)
+        
+        # Partition Key: /id for users, /type for incidents (or just /id for simplicity)
+        pk_path = "/id"
+        
+        container = database.create_container_if_not_exists(
+            id=container_name,
+            partition_key=PartitionKey(path=pk_path),
+            offer_throughput=400
+        )
+        return container
+    except Exception as e:
+        print(f"Error connecting to Cosmos DB ({container_name}): {e}")
+        return None
 
 # Persistence
 DB_FILE = "users.json"
 
 def load_users():
+    # Try Cosmos DB first
+    container = get_container("users")
+    if container:
+        try:
+            items = list(container.read_all_items())
+            users_dict = {}
+            for item in items:
+                # Map Cosmos item back to local structure
+                email = item.get('id')
+                if email:
+                    users_dict[email] = {
+                        'password': item.get('password'),
+                        'name': item.get('name')
+                    }
+            return users_dict
+        except Exception as e:
+            print(f"Error loading users from Cosmos: {e}")
+            # Fallback? No, if configured, respect it.
+            return {}
+
+    # Fallback to Local File
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, 'r') as f: return json.load(f)
@@ -25,6 +79,23 @@ def load_users():
     return {}
 
 def save_users(users):
+    container = get_container("users")
+    if container:
+        # Cosmos DB Strategy: Upsert each user
+        # Note: This is inefficient for bulk but fine for this demo's load.
+        # Ideally we only save the CHANGED user.
+        for email, data in users.items():
+            item = {
+                'id': email,
+                'password': data.get('password'),
+                'name': data.get('name')
+            }
+            try:
+                container.upsert_item(item)
+            except Exception as e:
+                print(f"Error saving user {email} to Cosmos: {e}")
+        return
+
     with open(DB_FILE, 'w') as f: json.dump(users, f)
 
 # High Risk Zones
@@ -190,6 +261,16 @@ def get_speed_limit_endpoint():
 INCIDENTS_FILE = "incidents.json"
 
 def load_incidents():
+    container = get_container("incidents")
+    if container:
+        try:
+            items = list(container.read_all_items())
+            # Convert system properties if needed, but returning dicts is fine
+            return items
+        except Exception as e:
+             print(f"Error loading incidents from Cosmos: {e}")
+             return []
+
     if os.path.exists(INCIDENTS_FILE):
         try:
             with open(INCIDENTS_FILE, 'r') as f: return json.load(f)
@@ -197,6 +278,19 @@ def load_incidents():
     return []
 
 def save_incidents(incidents):
+    container = get_container("incidents")
+    if container:
+        for incident in incidents:
+            # Ensure ID is string for Cosmos
+            if 'id' in incident:
+                incident['id'] = str(incident['id'])
+            
+            try:
+                container.upsert_item(incident)
+            except Exception as e:
+                print(f"Error saving incident to Cosmos: {e}")
+        return
+
     with open(INCIDENTS_FILE, 'w') as f: json.dump(incidents, f)
 
 @app.route('/api/report_incident', methods=['POST'])
