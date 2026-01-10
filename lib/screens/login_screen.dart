@@ -6,12 +6,16 @@ import 'package:cruze_mobile/widgets/glass_card.dart'; // Import GlassCard
 import 'package:flutter/foundation.dart'; // For defaultTargetPlatform
 import 'package:cruze_mobile/services/user_service.dart';
 
+import 'package:cruze_mobile/main.dart'; // Import for MainScaffold
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
+
+
 
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController nameController = TextEditingController();
@@ -66,7 +70,26 @@ class _LoginScreenState extends State<LoginScreen> {
         UserService.instance.setUser(savedName, email, score: score, imageUrl: imgUrl);
 
         if (_isLogin) {
-           Navigator.of(context).pushReplacementNamed('/home');
+           // Custom Premium Transition (Fade + Scale)
+           Navigator.of(context).pushReplacement(
+             PageRouteBuilder(
+               pageBuilder: (context, animation, secondaryAnimation) => const MainScaffold(),
+               transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                 const curve = Curves.easeInOutCubic;
+                 var tween = Tween(begin: 0.0, end: 1.0).chain(CurveTween(curve: curve));
+                 var scaleTween = Tween(begin: 0.9, end: 1.0).chain(CurveTween(curve: curve));
+
+                 return FadeTransition(
+                   opacity: animation.drive(tween),
+                   child: ScaleTransition(
+                     scale: animation.drive(scaleTween),
+                     child: child,
+                   ),
+                 );
+               },
+               transitionDuration: const Duration(milliseconds: 800),
+             ),
+           );
         } else {
            if (mounted) _showErrorDialog("Success", "Account Created! Please Log In.");
            setState(() {
