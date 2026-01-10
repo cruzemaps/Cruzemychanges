@@ -822,15 +822,15 @@ class _MapScreenState extends State<MapScreen> {
                return AnimatedPositioned(
                  duration: const Duration(milliseconds: 300),
                  curve: Curves.easeInOut,
-                 top: isNavigating ? -150 : 0, // Slide up to hide
+                 top: 0, // Always visible (Shows Search in Idle, Instructions in Nav)
                  left: 0,
                  right: 0,
                  child: SafeArea( 
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     constraints: const BoxConstraints(maxWidth: 600),
-                    child: _destination == null 
-                      ? // Search Mode
+                    child: !isNavigating
+                      ? // Search Mode OR Preview Mode (Show Search Bar)
                         GlassCard(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
@@ -840,15 +840,23 @@ class _MapScreenState extends State<MapScreen> {
                                 onChanged: _onSearchChanged,
                                 style: const TextStyle(color: Colors.white),
                                 decoration: InputDecoration(
-                                  hintText: 'Search destination...',
+                                  hintText: _destination != null ? 'Tap to clear destination...' : 'Search destination...',
                                   hintStyle: TextStyle(color: Colors.grey[600]),
                                   prefixIcon: const Icon(Icons.search, color: Color(0xFFff791a)),
-                                  suffixIcon: _searchController.text.isNotEmpty
+                                  suffixIcon: _searchController.text.isNotEmpty || _destination != null
                                       ? IconButton(
                                           icon: const Icon(Icons.clear, color: Colors.grey),
                                           onPressed: () {
                                             _searchController.clear();
-                                            _onSearchChanged('');
+                                            if (_destination != null) {
+                                               _setDestination(const LatLng(0,0));
+                                               setState(() {
+                                                  _destination = null;
+                                                  _routePoints = [];
+                                               });
+                                            } else {
+                                               _onSearchChanged('');
+                                            }
                                           },
                                         )
                                       : null,
@@ -865,7 +873,7 @@ class _MapScreenState extends State<MapScreen> {
                             ],
                           ),
                         )
-                      : // Navigation Mode (Turn-by-Turn)
+                      : // Navigation Mode (Turn-by-Turn - Only in Drive Mode)
                         GlassCard(
                           child: Row(
                             children: [
@@ -908,12 +916,7 @@ class _MapScreenState extends State<MapScreen> {
                              IconButton(
                                 icon: const Icon(Icons.close, color: Colors.white54),
                                 onPressed: () {
-                                  _setDestination(const LatLng(0,0)); // Clear dest
-                                  setState(() {
-                                     _destination = null;
-                                     _routePoints = [];
-                                     _isFollowingUser = true;
-                                  });
+                                  _endDriveMode(); // Cancel navigation
                                 },
                              )
                             ],
@@ -956,7 +959,7 @@ class _MapScreenState extends State<MapScreen> {
           // Recenter Button
           if (!_isFollowingUser)
              Positioned(
-               bottom: 180 + MediaQuery.of(context).padding.bottom, // Dynamic padding
+               bottom: 110 + MediaQuery.of(context).padding.bottom, // Adjusted slightly higher
                right: 16,
                child: FloatingActionButton(
                  heroTag: "recenter_fab",
@@ -972,66 +975,83 @@ class _MapScreenState extends State<MapScreen> {
              ),
              
           // Report Incident Button (Bottom Left)
-          Positioned(
-             bottom: 180 + MediaQuery.of(context).padding.bottom, // Measured from safe bottom
-             left: 16,
-             child: FloatingActionButton(
-               heroTag: "report_fab",
-               onPressed: _showReportDialog,
-               backgroundColor: Colors.redAccent,
-               child: const Icon(Icons.report_problem, color: Colors.white),
-             ),
+          ValueListenableBuilder<bool>(
+            valueListenable: NavigationService.instance.isNavigating,
+            builder: (context, isNavigating, child) {
+              return AnimatedPositioned(
+                 duration: const Duration(milliseconds: 300),
+                 curve: Curves.easeInOut,
+                 // Move to bottom corner (20) when navigating, else keep at 110 (above sheet)
+                 bottom: (isNavigating ? 20 : 110) + MediaQuery.of(context).padding.bottom, 
+                 left: 16,
+                 child: FloatingActionButton(
+                   heroTag: "report_fab",
+                   onPressed: _showReportDialog,
+                   backgroundColor: Colors.redAccent,
+                   child: const Icon(Icons.report_problem, color: Colors.white),
+                 ),
+              );
+            },
           ),
 
-          // HUD Overlay (Bottom)
-          Positioned(
-            bottom: 120 + MediaQuery.of(context).padding.bottom, 
-            left: 20,
-            right: 20,
-            child: SafeArea(
-              top: false,
-              bottom: false, // Handled manually
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                   // SPEED LIMIT & CURRENT SPEED
-                   Column(
-                     mainAxisSize: MainAxisSize.min,
-                     children: [
-                       Container(
-                         width: 50,
-                         height: 60,
-                         decoration: BoxDecoration(
-                           color: Colors.white,
-                           borderRadius: BorderRadius.circular(8),
-                           border: Border.all(color: Colors.black, width: 3),
-                           boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                         ),
-                         child: Column(
-                           mainAxisAlignment: MainAxisAlignment.center,
-                           children: [
-                             Text('LIMIT', style: GoogleFonts.montserrat(color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900)),
-                             Text(
-                                '${_speedLimit ?? "--"}',
-                                style: GoogleFonts.montserrat(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w900),
+          // HUD Overlay (Bottom) - Only show when Navigating
+           ValueListenableBuilder<bool>(
+             valueListenable: NavigationService.instance.isNavigating,
+             builder: (context, isNavigating, child) {
+               if (!isNavigating) return const SizedBox.shrink(); // Hide if not driving
+  
+               return Positioned(
+                bottom: 120 + MediaQuery.of(context).padding.bottom, 
+                left: 20,
+                right: 20,
+                child: SafeArea(
+                  top: false,
+                  bottom: false, // Handled manually
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                       // SPEED LIMIT & CURRENT SPEED
+                       Column(
+                         mainAxisSize: MainAxisSize.min,
+                         children: [
+                           if (_speedLimit != null) ...[ // Only show if limit known
+                             Container(
+                               width: 50,
+                               height: 60,
+                               decoration: BoxDecoration(
+                                 color: Colors.white,
+                                 borderRadius: BorderRadius.circular(8),
+                                 border: Border.all(color: Colors.black, width: 3),
+                                 boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                               ),
+                               child: Column(
+                                 mainAxisAlignment: MainAxisAlignment.center,
+                                 children: [
+                                   Text('LIMIT', style: GoogleFonts.montserrat(color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900)),
+                                   Text(
+                                      '${_speedLimit}',
+                                      style: GoogleFonts.montserrat(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w900),
+                                   ),
+                                 ],
+                               ),
                              ),
+                             const SizedBox(height: 8),
                            ],
-                         ),
+                           GlassCard(
+                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                             child: Text(
+                               '${_currentSpeed.toInt()} MPH',
+                               style: GoogleFonts.montserrat(color: const Color(0xFFff791a), fontWeight: FontWeight.bold, fontSize: 16),
+                             ),
+                           ),
+                         ],
                        ),
-                       const SizedBox(height: 8),
-                       GlassCard(
-                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                         child: Text(
-                           '${_currentSpeed.toInt()} MPH',
-                           style: GoogleFonts.montserrat(color: const Color(0xFFff791a), fontWeight: FontWeight.bold, fontSize: 16),
-                         ),
-                       ),
-                     ],
-                   ),
-                ],
-              ),
-            ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
           
           // CRASH OVERLAY

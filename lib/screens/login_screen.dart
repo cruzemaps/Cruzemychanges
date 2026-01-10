@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:cruze_mobile/widgets/glass_card.dart'; // Import GlassCard
 import 'package:flutter/foundation.dart'; // For defaultTargetPlatform
+import 'package:cruze_mobile/services/user_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -25,9 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final String name = nameController.text.trim();
 
     if (email.isEmpty || password.isEmpty || (!_isLogin && name.isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all fields')),
-      );
+      if (mounted) _showErrorDialog("Authentication Error", "Please fill all fields to proceed.");
       return;
     }
 
@@ -56,29 +55,86 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (response.statusCode == 200) {
         if (!mounted) return;
+        
+        // Parse User Data
+        final body = jsonDecode(response.body);
+        final String savedName = _isLogin ? (body['name'] ?? "Driver") : name;
+        final int score = body['safety_score'] ?? 100; // Default if missing
+        final String? imgUrl = body['profile_picture_url'];
+        
+        // Update User Service
+        UserService.instance.setUser(savedName, email, score: score, imageUrl: imgUrl);
+
         if (_isLogin) {
            Navigator.of(context).pushReplacementNamed('/home');
         } else {
-           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Account created! Please log in.')),
-          );
+           if (mounted) _showErrorDialog("Success", "Account Created! Please Log In.");
            setState(() {
              _isLogin = true;
            });
         }
+
       } else {
          if (!mounted) return;
-         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${response.body}')),
-        );
+         _showErrorDialog("Access Denied", "Server Error: ${response.body}");
       }
     } catch (e) {
       if (!mounted) return;
       // Fallback for demo if backend is down
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Connection Error: $e')),
-      );
+      _showErrorDialog("Connection Failure", "Could not connect to the fleet network.\nError: $e");
     }
+  }
+
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: GlassCard(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 48),
+              const SizedBox(height: 16),
+              Text(
+                title.toUpperCase(),
+                style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                style: GoogleFonts.inter(
+                  color: Colors.white70,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.1),
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text("ACKNOWLEDGE"),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -94,7 +150,7 @@ class _LoginScreenState extends State<LoginScreen> {
           Container(
             decoration: const BoxDecoration(
               image: DecorationImage(
-                image: NetworkImage("https://lh3.googleusercontent.com/aida-public/AB6AXuCLrD2crOep5pSZ993-uKKfJR2xTyQIlbmmfOiJSwX5mg9MhFKppl8kGsMwZOI_zd4V-uHwlZIpjljtVComNA2NCbBM1UmRzN5KLBMTbTzSaMqJRNFR0ax_P_Na1GFEhTHNeJPmbzB-atoRux5x8IU1HNfxX-dIBdPxSlTRreLMzSN-h9MsRj2nzCxe58IunEmJV597eOqjOG_9N889f39Lf6c_2hEHpNZcJ3u4ruXTPEASgPTZ1VAyOH8nmVjCSR2E5UOAE-xQUiUa"),
+                image: AssetImage('assets/images/login_bg.png'),
                 fit: BoxFit.cover,
                 colorFilter: ColorFilter.mode(Colors.black54, BlendMode.darken),
               ),
@@ -246,6 +302,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ],
+                  ),
                 ),
               ),
             ),

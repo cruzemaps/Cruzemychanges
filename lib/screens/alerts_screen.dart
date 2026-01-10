@@ -18,6 +18,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
   String _selectedFilter = 'All';
 
   void _handleMarkAllRead() {
+    SafetyService.instance.clearEvents(); // Clear actual events
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('All alerts marked as read!'), backgroundColor: Colors.green),
     );

@@ -72,4 +72,8 @@ class SafetyService {
 
     safetyScore.value = calculatedScore;
   }
+
+  void clearEvents() {
+    events.value = [];
+  }
 }

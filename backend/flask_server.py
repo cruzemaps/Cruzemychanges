@@ -2,12 +2,20 @@ import json
 import os
 import random
 import logging
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 import requests
 
 # Setup Flask
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
+# Enable CORS for Flutter Web (localhost:7071)
+CORS(app)
+
+# Ensure upload directory
+UPLOAD_FOLDER = os.path.join('static', 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # Enable CORS for Flutter Web (localhost:7071)
 CORS(app)
 
@@ -63,7 +71,9 @@ def load_users():
                 if email:
                     users_dict[email] = {
                         'password': item.get('password'),
-                        'name': item.get('name')
+                        'name': item.get('name'),
+                        'safety_score': item.get('safety_score', 100), # Default 100
+                        'profile_picture_url': item.get('profile_picture_url')
                     }
             return users_dict
         except Exception as e:
@@ -88,7 +98,9 @@ def save_users(users):
             item = {
                 'id': email,
                 'password': data.get('password'),
-                'name': data.get('name')
+                'name': data.get('name'),
+                'safety_score': data.get('safety_score', 100),
+                'profile_picture_url': data.get('profile_picture_url')
             }
             try:
                 container.upsert_item(item)
@@ -120,11 +132,60 @@ def signup():
     if email in users:
         return jsonify({"error": "User exists"}), 409
         
-    users[email] = {'password': password, 'name': name}
+    users[email] = {'password': password, 'name': name, 'safety_score': 100} # Default 100
     save_users(users)
     
     print(f"User Created: {email}")
     return jsonify({"status": "success", "message": "User created"}), 200
+
+@app.route('/api/update_profile', methods=['POST'])
+def update_profile():
+    data = request.json
+    email = data.get('email')
+    name = data.get('name')
+    
+    if not email or not name:
+        return jsonify({"error": "Missing fields"}), 400
+        
+    users = load_users()
+    if email not in users:
+        return jsonify({"error": "User not found"}), 404
+        
+    # Update Name
+    users[email]['name'] = name
+    save_users(users)
+    
+    print(f"User Updated: {email} -> {name}")
+    return jsonify({"status": "success", "message": "Profile updated"}), 200
+
+@app.route('/api/upload_avatar', methods=['POST'])
+def upload_avatar():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    file = request.files['file']
+    email = request.form.get('email')
+    
+    if file.filename == '' or not email:
+        return jsonify({"error": "No selected file or email missing"}), 400
+        
+    if file:
+        filename = secure_filename(f"{email}_avatar.png") # Force png or keep extension
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Generate URL (assuming localhost access for now)
+        # In production, this would be a blob storage URL
+        file_url = f"/static/uploads/{filename}"
+        
+        # Update User Record
+        users = load_users()
+        if email in users:
+            users[email]['profile_picture_url'] = file_url
+            save_users(users)
+            
+        print(f"Avatar Uploaded: {email} -> {filepath}")
+        return jsonify({"status": "success", "url": file_url}), 200
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -137,7 +198,12 @@ def login():
     
     if user and user['password'] == password:
         print(f"Login Success: {email}")
-        return jsonify({"status": "success", "name": user['name']}), 200
+        return jsonify({
+            "status": "success", 
+            "name": user['name'],
+            "safety_score": user.get('safety_score', 100),
+            "profile_picture_url": user.get('profile_picture_url')
+        }), 200
     
     return jsonify({"error": "Invalid credentials"}), 401
 
