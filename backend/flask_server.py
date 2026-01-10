@@ -326,6 +326,6 @@ def get_incidents():
     return jsonify({"incidents": incidents}), 200
 
 if __name__ == '__main__':
-    print("Starting HiveMind Backend (Flask Emulation) on port 7071...")
+    print("Starting Cruze Backend (Flask Emulation) on port 7071...")
     # Run on port 7071 to match Azure Functions default
     app.run(host='0.0.0.0', port=7071, debug=True)

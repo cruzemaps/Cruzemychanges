@@ -102,7 +102,8 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           
           Center(
-            child: SingleChildScrollView(
+            child: SafeArea(
+              child: SingleChildScrollView(
               padding: const EdgeInsets.all(24.0),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 400),
@@ -138,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'HIVE MIND',
+                            'CRUZE',
                             style: GoogleFonts.outfit(
                               fontSize: 32,
                               fontWeight: FontWeight.bold,

@@ -13,46 +13,47 @@ class ProfileScreen extends StatelessWidget {
     const Color textPrimary = Colors.white;
 
     return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 600),
-        child: Column(
-          children: [
-             // Custom Header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 60, 16, 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    onPressed: () {
-                       // If pushed from map, can pop. If from tab, maybe do nothing or show logout?
-                       // Since it's in a tab view now, back button might not be relevant unless it's a sub-page.
-                       // We'll change it to Logout for utility.
-                       Navigator.of(context).pushReplacementNamed('/');
-                    }, 
-                    icon: const Icon(Icons.logout, color: Colors.white54),
-                    tooltip: "Logout",
-                  ),
-                  Text(
-                    'DRIVER PROFILE',
-                    style: GoogleFonts.outfit(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      letterSpacing: 2,
+      child: SafeArea(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: Column(
+            children: [
+               // Custom Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 20), // Reduced top padding as SafeArea handles it
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      onPressed: () {
+                         // If pushed from map, can pop. If from tab, maybe do nothing or show logout?
+                         // Since it's in a tab view now, back button might not be relevant unless it's a sub-page.
+                         // We'll change it to Logout for utility.
+                         Navigator.of(context).pushReplacementNamed('/');
+                      }, 
+                      icon: const Icon(Icons.logout, color: Colors.white54),
+                      tooltip: "Logout",
                     ),
-                  ),
-                  IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.settings_outlined, color: Colors.white54),
-                  ),
-                ],
+                    Text(
+                      'DRIVER PROFILE',
+                      style: GoogleFonts.outfit(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () {},
+                      icon: const Icon(Icons.settings_outlined, color: Colors.white54),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 120), // Bottom padding for content
+              
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 120 + MediaQuery.of(context).padding.bottom), // Dynamic bottom padding
                 child: Column(
                   children: [
                     // Avatar & Name

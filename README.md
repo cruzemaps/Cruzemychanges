@@ -1,4 +1,4 @@
-# 🚗 Cruze Mobile (HiveMind Fleet)
+# 🚗 Cruze
 
 The AI-driven fleet safety application.
 
@@ -37,7 +37,7 @@ We use a Python backend for Authentication and Crash Telemetry.
     ```bash
     python3 backend/flask_server.py
     ```
-    *You should see: "Starting HiveMind Backend... on port 7071"*
+    *You should see: "Starting Cruze Backend... on port 7071"*
     *Keep this terminal running!*
 
 ### 4. Run the App (Frontend)

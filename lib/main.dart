@@ -104,7 +104,7 @@ class _MainScaffoldState extends State<MainScaffold> {
               return AnimatedPositioned(
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
-                bottom: isNavigating ? -100 : 0, // Slide off-screen
+                bottom: isNavigating ? -200 : 0, // Slide off-screen (increased for safe area)
                 left: 0,
                 right: 0,
                 child: GlassNavBar(

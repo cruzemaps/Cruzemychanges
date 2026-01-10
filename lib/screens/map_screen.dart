@@ -745,7 +745,7 @@ class _MapScreenState extends State<MapScreen> {
              builder: (context, isNavigating, child) {
                if (_routePoints.isNotEmpty && !isNavigating) {
                   return Positioned(
-                     bottom: 120, // Clear Nav Bar
+                     bottom: 120 + MediaQuery.of(context).padding.bottom, // Dynamic padding
                      left: 20, 
                      right: 20,
                      child: Column(
@@ -798,7 +798,7 @@ class _MapScreenState extends State<MapScreen> {
              builder: (context, isNavigating, child) {
                 if (isNavigating) {
                    return Positioned(
-                     bottom: 40, 
+                     bottom: 40 + MediaQuery.of(context).padding.bottom, 
                      left: 0,
                      right: 0,
                      child: Center(
@@ -956,7 +956,7 @@ class _MapScreenState extends State<MapScreen> {
           // Recenter Button
           if (!_isFollowingUser)
              Positioned(
-               bottom: 180, // Moved up to match Report button (Symmetry) & Clear HUD
+               bottom: 180 + MediaQuery.of(context).padding.bottom, // Dynamic padding
                right: 16,
                child: FloatingActionButton(
                  heroTag: "recenter_fab",
@@ -973,7 +973,7 @@ class _MapScreenState extends State<MapScreen> {
              
           // Report Incident Button (Bottom Left)
           Positioned(
-             bottom: 180, // Moved up to clear HUD
+             bottom: 180 + MediaQuery.of(context).padding.bottom, // Measured from safe bottom
              left: 16,
              child: FloatingActionButton(
                heroTag: "report_fab",
@@ -985,11 +985,12 @@ class _MapScreenState extends State<MapScreen> {
 
           // HUD Overlay (Bottom)
           Positioned(
-            bottom: 120, 
+            bottom: 120 + MediaQuery.of(context).padding.bottom, 
             left: 20,
             right: 20,
             child: SafeArea(
               top: false,
+              bottom: false, // Handled manually
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
