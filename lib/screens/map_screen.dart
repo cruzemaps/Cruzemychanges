@@ -138,6 +138,11 @@ class _MapScreenState extends State<MapScreen> {
             }
 
             // High Risk Zone Alert Logic
+             if (_destination != null) {
+               _updateNavigation(newLatLng, speedMph);
+               _fetchSpeedLimit(newLatLng);
+             }
+
              for (final zone in _highRiskZones) {
                const Distance distance = Distance();
                final double meterDist = distance.as(LengthUnit.Meter, newLatLng, zone);
@@ -501,6 +506,43 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  void _updateNavigation(LatLng currentPos, double speedMph) {
+    if (_routePoints.isEmpty || _destination == null) return;
+
+    // 1. Calculate Distance to Destination
+    double totalDist = 0;
+    for (int i = 0; i < _routePoints.length - 1; i++) {
+      totalDist += const Distance().as(LengthUnit.Mile, _routePoints[i], _routePoints[i+1]);
+    }
+    // Add distance from current to start of route remainder
+    if (_routePoints.isNotEmpty) {
+       totalDist += const Distance().as(LengthUnit.Mile, currentPos, _routePoints.first);
+    }
+    
+    // 2. Generate Instruction (Simulated)
+    // In a real app, this comes from OSRM steps.
+    // For now, we just say "Continue on current road" or "Turn right in X miles"
+    String instruction = "Continue on route";
+    if (totalDist < 0.1) {
+      instruction = "Arriving at destination";
+    } else if (totalDist < 0.5) {
+      instruction = "Prepare to stop";
+    }
+
+    setState(() {
+      _routeDistance = "${totalDist.toStringAsFixed(1)} mi";
+      _currentInstruction = instruction;
+    });
+    
+    // Remove passed points (simple heuristic)
+    if (_routePoints.isNotEmpty) {
+       final distToFirst = const Distance().as(LengthUnit.Meter, currentPos, _routePoints.first);
+       if (distToFirst < 30) {
+         _routePoints.removeAt(0);
+       }
+    }
+  }
+
   Widget _buildReportOption(String label, IconData icon, Color color) {
     return InkWell(
       onTap: () {
@@ -599,8 +641,65 @@ class _MapScreenState extends State<MapScreen> {
   void _endDriveMode() {
      NavigationService.instance.stopNavigation();
      setState(() {
-       _routePoints = []; // Clear Route (Optional)
+       _isFollowingUser = false;
+       _currentInstruction = null;
+       _speedLimit = null; // Reset
+       _routePoints = [];
      });
+  }
+  
+  // Speed Limit Logic
+  DateTime? _lastSpeedLimitFetch;
+  
+  Future<void> _fetchSpeedLimit(LatLng pos) async {
+    // Throttle: Only fetch every 15 seconds to be kind to Overpass API
+    if (_lastSpeedLimitFetch != null && DateTime.now().difference(_lastSpeedLimitFetch!) < const Duration(seconds: 15)) {
+      return;
+    }
+    _lastSpeedLimitFetch = DateTime.now();
+
+    try {
+      // Overpass QL: Find ways around the point with 'maxspeed' tag
+      final String radius = "25";
+      final String query = '[out:json];way(around:$radius,${pos.latitude},${pos.longitude})["maxspeed"];out tags;';
+      final Uri url = Uri.parse('https://overpass-api.de/api/interpreter?data=$query');
+
+      final response = await http.get(url);
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final elements = data['elements'] as List;
+        
+        if (elements.isNotEmpty) {
+           // Get the first match's maxspeed
+           final tags = elements.first['tags'];
+           if (tags != null && tags['maxspeed'] != null) {
+             String rawSpeed = tags['maxspeed'];
+             // Parse "30 mph" or "50"
+             int? limit;
+             
+             if (rawSpeed.toLowerCase().contains("mph")) {
+               limit = int.tryParse(rawSpeed.replaceAll(RegExp(r'[^0-9]'), ''));
+             } else if (rawSpeed.toLowerCase().contains("km/h")) {
+               // Convert km/h to mph (approx 0.62)
+               int? kph = int.tryParse(rawSpeed.replaceAll(RegExp(r'[^0-9]'), ''));
+               if (kph != null) limit = (kph * 0.621371).round();
+             } else {
+               // Improve heuristic: Default to MPH for now (US context)
+               limit = int.tryParse(rawSpeed);
+             }
+
+             if (limit != null && mounted) {
+               setState(() {
+                 _speedLimit = limit;
+               });
+             }
+           }
+        }
+      }
+    } catch (e) {
+      debugPrint("Error fetching speed limit: $e");
+    }
   }
 
   @override
@@ -1001,52 +1100,45 @@ class _MapScreenState extends State<MapScreen> {
                if (!isNavigating) return const SizedBox.shrink(); // Hide if not driving
   
                return Positioned(
-                bottom: 120 + MediaQuery.of(context).padding.bottom, 
-                left: 20,
-                right: 20,
+                bottom: 20 + MediaQuery.of(context).padding.bottom, // Bottom Corner
+                right: 20, // Right Aligned
                 child: SafeArea(
                   top: false,
-                  bottom: false, // Handled manually
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  bottom: false, 
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end, // Align text to right
                     children: [
-                       // SPEED LIMIT & CURRENT SPEED
-                       Column(
-                         mainAxisSize: MainAxisSize.min,
-                         children: [
-                           if (_speedLimit != null) ...[ // Only show if limit known
-                             Container(
-                               width: 50,
-                               height: 60,
-                               decoration: BoxDecoration(
-                                 color: Colors.white,
-                                 borderRadius: BorderRadius.circular(8),
-                                 border: Border.all(color: Colors.black, width: 3),
-                                 boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                               ),
-                               child: Column(
-                                 mainAxisAlignment: MainAxisAlignment.center,
-                                 children: [
-                                   Text('LIMIT', style: GoogleFonts.montserrat(color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900)),
-                                   Text(
-                                      '${_speedLimit}',
-                                      style: GoogleFonts.montserrat(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w900),
-                                   ),
-                                 ],
-                               ),
-                             ),
-                             const SizedBox(height: 8),
-                           ],
-                           GlassCard(
-                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                             child: Text(
-                               '${_currentSpeed.toInt()} MPH',
-                               style: GoogleFonts.montserrat(color: const Color(0xFFff791a), fontWeight: FontWeight.bold, fontSize: 16),
-                             ),
-                           ),
-                         ],
-                       ),
+                      if (_speedLimit != null) ...[ // Only show if limit known
+                        Container(
+                          width: 50,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.black, width: 3),
+                            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('LIMIT', style: GoogleFonts.montserrat(color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900)),
+                              Text(
+                                 '${_speedLimit}',
+                                 style: GoogleFonts.montserrat(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w900),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      GlassCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Text(
+                          '${_currentSpeed.toInt()} MPH',
+                          style: GoogleFonts.montserrat(color: const Color(0xFFff791a), fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ),
                     ],
                   ),
                 ),

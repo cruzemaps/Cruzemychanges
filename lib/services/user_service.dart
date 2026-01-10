@@ -15,13 +15,21 @@ class UserService {
   final ValueNotifier<String> email = ValueNotifier<String>("");
   final ValueNotifier<String> role = ValueNotifier<String>("Elite Driver");
   final ValueNotifier<int> safetyScore = ValueNotifier<int>(98);
+  final ValueNotifier<double> totalMiles = ValueNotifier<double>(0.0);
   final ValueNotifier<String?> profileImage = ValueNotifier<String?>(null);
 
-  void setUser(String newName, String newEmail, {int score = 98, String? imageUrl}) {
+  void setUser(String newName, String newEmail, {int score = 98, double miles = 0.0, String? imageUrl}) {
     name.value = newName.isNotEmpty ? newName : "Driver";
     email.value = newEmail;
     safetyScore.value = score;
+    totalMiles.value = miles;
     profileImage.value = imageUrl;
+  }
+  
+  void updateStats(int score, double miles) {
+    safetyScore.value = score;
+    totalMiles.value = miles;
+    // Persist to backend logic can go here (or tracked separately)
   }
 
   Future<void> uploadProfileImage(dynamic imageFile) async {

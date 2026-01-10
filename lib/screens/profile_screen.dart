@@ -218,7 +218,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           const SizedBox(width: 24),
                           Expanded(
-                            child: _buildStatItem("WEEKLY MILES", "1,240", Colors.white, suffix: " mi"),
+                            child: ValueListenableBuilder<double>(
+                              valueListenable: UserService.instance.totalMiles,
+                              builder: (context, miles, child) {
+                                return _buildStatItem("TOTAL MILES", miles.toStringAsFixed(1), Colors.white, suffix: " mi");
+                              },
+                            ),
                           ),
                         ],
                       ),

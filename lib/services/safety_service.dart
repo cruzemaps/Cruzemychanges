@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:cruze_mobile/services/user_service.dart';
 
 class SafetyEvent {
   final String title;
@@ -22,7 +23,16 @@ class SafetyService {
     return instance;
   }
 
-  SafetyService._internal();
+  SafetyService._internal() {
+    // Initialize from UserService (Source of Truth)
+    _totalDistanceMiles = UserService.instance.totalMiles.value;
+    double currentScore = UserService.instance.safetyScore.value.toDouble();
+    
+    // Reverse engineer penalty: Penalty = (100 - Score) * Miles
+    if (_totalDistanceMiles > 0) {
+      _accumulatedPenalty = (100 - currentScore) * _totalDistanceMiles;
+    }
+  }
 
   // State
   final ValueNotifier<double> safetyScore = ValueNotifier<double>(100.0);
@@ -71,6 +81,9 @@ class SafetyService {
     if (calculatedScore > 100) calculatedScore = 100;
 
     safetyScore.value = calculatedScore;
+    
+    // Sync back to UserService
+    UserService.instance.updateStats(calculatedScore.round(), _totalDistanceMiles);
   }
 
   void clearEvents() {
