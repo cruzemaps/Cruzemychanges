@@ -21,6 +21,7 @@ class CruzeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false, // Hides the "DEBUG" banner
       title: 'Cruze',
       // ENFORCE BOUNCING SCROLL PHYSICS GLOBALLY (Better Touch Feel)
       scrollBehavior: const MaterialScrollBehavior().copyWith(
