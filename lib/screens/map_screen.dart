@@ -18,7 +18,7 @@ import 'package:cruze_mobile/services/safety_service.dart'; // Import SafetyServ
 import 'package:cruze_mobile/services/navigation_service.dart'; // Import NavigationService
 import 'package:cruze_mobile/services/signal_glide_service.dart'; // Import SignalGlideService
 import 'package:cruze_mobile/widgets/signal_ring.dart'; // Import SignalRing
-import 'package:cruze_mobile/services/platooning_service.dart'; // Import PlatooningService
+import 'package:cruze_mobile/services/ghost_lock_service.dart'; // Import GhostLockService
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -40,6 +40,8 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<Map<String, dynamic>>? _signalSubscription; // Signal Glide
   Map<String, dynamic>? _signalData;
   StreamSubscription<List<dynamic>>? _platoonSubscription; // Platooning
+  StreamSubscription<LatLng>? _ghostLockSubscription; // Ghost Lock
+  bool _ghostLockActive = false;
 
   bool _crashDetected = false;
   StreamSubscription? _accelerometerSubscription;
@@ -47,6 +49,20 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _destination;
   String? _routeDistance;
   List<LatLng> _routePoints = [];
+
+  void _toggleGhostLock() {
+    setState(() {
+       _ghostLockActive = !_ghostLockActive;
+    });
+    
+    if (_ghostLockActive) {
+      GhostLockService.instance.startTracking(_currentPosition);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("👻 GHOST LOCK ENGAGED: GPS DENIED"), backgroundColor: Colors.purpleAccent));
+    } else {
+      GhostLockService.instance.stopTracking();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("GPS RESTORED"), backgroundColor: Colors.green));
+    }
+  }
 
   @override
   void initState() {
@@ -93,6 +109,16 @@ class _MapScreenState extends State<MapScreen> {
              );
           }
         }
+      }
+    });
+
+    // Ghost Lock Listener
+    _ghostLockSubscription = GhostLockService.instance.positionStream.listen((pos) {
+      if (_ghostLockActive && mounted) {
+        setState(() {
+          _currentPosition = pos;
+        });
+        _mapController.move(pos, _mapController.camera.zoom);
       }
     });
   }
@@ -669,6 +695,8 @@ class _MapScreenState extends State<MapScreen> {
     SignalGlideService.instance.stopPolling();
     _platoonSubscription?.cancel(); // Cancel Platooning
     PlatooningService.instance.stop();
+    _ghostLockSubscription?.cancel(); // Cancel Ghost Lock
+    GhostLockService.instance.stopTracking();
     super.dispose();
   }
 
@@ -826,6 +854,17 @@ class _MapScreenState extends State<MapScreen> {
                     timeToGreen: (_signalData!['time_to_green'] ?? 0).toDouble(),
                   ),
                 ),
+
+              // GHOST LOCK TOGGLE (Top Right)
+              Positioned(
+                top: 60,
+                right: 20,
+                child: FloatingActionButton.small(
+                  backgroundColor: _ghostLockActive ? Colors.purpleAccent : Colors.grey[800],
+                  onPressed: _toggleGhostLock,
+                  child: const Icon(Icons.gps_off, color: Colors.white),
+                ),
+              ),
               MarkerLayer(
                 markers: [
                    // High Risk Zone Icons
