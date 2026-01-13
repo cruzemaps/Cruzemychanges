@@ -32,7 +32,7 @@ if COSMOS_CONNECTION_STRING:
 else:
     print("⚠️ COSMOS DB DISABLED: Connection String Missing (Using Local Files)")
 
-DATABASE_NAME = "cruze_db"
+DATABASE_NAME = "CruzeDB"
 
 def get_container(container_name):
     if not COSMOS_CONNECTION_STRING:
@@ -238,6 +238,13 @@ def diagnostics_log():
     data = request.json
     print(f"\n[SONIC] 🔊 VIBRATION ANOMALY! Jerk Score: {data.get('score')} (Threshold: {data.get('threshold')})")
     return jsonify({"status": "logged", "advice": "Check Suspension"}), 200
+
+@app.route('/api/blackbox/upload', methods=['POST'])
+def blackbox_upload():
+    data = request.json
+    # In reality: Save to Azure Blob Storage (Immutable WORM policy)
+    print(f"\n[BLACK BOX] 📦 FORENSIC LOG RECEIVED! Events: {len(data.get('log', []))} Timestamp: {data.get('timestamp')}")
+    return jsonify({"status": "secured", "url": "https://azure.blob/forensics/log_123.json"}), 200
 
 
 # Mock SPaT Data (Signal Phase and Timing)

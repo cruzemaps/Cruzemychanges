@@ -20,6 +20,7 @@ import 'package:cruze_mobile/services/signal_glide_service.dart'; // Import Sign
 import 'package:cruze_mobile/widgets/signal_ring.dart'; // Import SignalRing
 import 'package:cruze_mobile/services/ghost_lock_service.dart'; // Import GhostLockService
 import 'package:cruze_mobile/services/lane_service.dart'; // Import LaneService
+import 'package:cruze_mobile/services/black_box_service.dart'; // Import BlackBoxService
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -955,6 +956,16 @@ class _MapScreenState extends State<MapScreen> {
                       backgroundColor: _isTruck ? Colors.indigo : Colors.grey[800],
                       onPressed: _toggleTruckMode,
                       child: const Icon(Icons.local_shipping, color: Colors.white),
+                    ),
+                    const SizedBox(height: 10),
+                    FloatingActionButton.small(
+                      heroTag: "black_box",
+                      backgroundColor: Colors.black,
+                      onPressed: () {
+                         BlackBoxService.instance.triggerUpload();
+                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("📦 BLACK BOX UPLOADING..."), backgroundColor: Colors.black));
+                      },
+                      child: const Icon(Icons.sd_storage, color: Colors.white),
                     ),
                   ],
                 ),
