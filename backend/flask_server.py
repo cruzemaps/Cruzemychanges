@@ -264,6 +264,20 @@ def get_platoon_messages():
     # Return last 10
     return jsonify({"messages": platoon_messages[-10:]}), 200
 
+# Predictive Lane Optimization (Mock Digital Twins)
+@app.route('/api/lanes', methods=['GET'])
+def get_lane_recommendation():
+    # lat = request.args.get('lat')
+    # Mocking logic based on random
+    # In reality: Query Azure Digital Twins for segment flow
+    r = random.random()
+    if r < 0.3:
+        return jsonify({"lane": "LEFT", "reason": "Flow +15%", "icon": "MERGE_LEFT"}), 200
+    elif r < 0.6:
+         return jsonify({"lane": "RIGHT", "reason": "Avoid Exit Queue", "icon": "MERGE_RIGHT"}), 200
+    else:
+        return jsonify({"lane": "CENTER", "reason": "Optimal Flow", "icon": "STRAIGHT"}), 200
+
 @app.route('/api/route', methods=['GET'])
 def get_route():
     start_lat = request.args.get('start_lat')

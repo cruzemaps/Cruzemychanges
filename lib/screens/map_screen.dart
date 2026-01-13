@@ -19,6 +19,7 @@ import 'package:cruze_mobile/services/navigation_service.dart'; // Import Naviga
 import 'package:cruze_mobile/services/signal_glide_service.dart'; // Import SignalGlideService
 import 'package:cruze_mobile/widgets/signal_ring.dart'; // Import SignalRing
 import 'package:cruze_mobile/services/ghost_lock_service.dart'; // Import GhostLockService
+import 'package:cruze_mobile/services/lane_service.dart'; // Import LaneService
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -41,6 +42,8 @@ class _MapScreenState extends State<MapScreen> {
   Map<String, dynamic>? _signalData;
   StreamSubscription<List<dynamic>>? _platoonSubscription; // Platooning
   StreamSubscription<LatLng>? _ghostLockSubscription; // Ghost Lock
+  StreamSubscription<Map<String, dynamic>>? _laneSubscription; // Lane Opt
+  Map<String, dynamic>? _laneAdvice;
   bool _ghostLockActive = false;
 
   bool _crashDetected = false;
@@ -49,7 +52,7 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _destination;
   String? _routeDistance;
   List<LatLng> _routePoints = [];
-
+  
   void _toggleGhostLock() {
     setState(() {
        _ghostLockActive = !_ghostLockActive;
@@ -120,6 +123,12 @@ class _MapScreenState extends State<MapScreen> {
         });
         _mapController.move(pos, _mapController.camera.zoom);
       }
+    });
+
+    // Lane Optimization Service
+    LaneService.instance.startPolling(_initialCenter);
+    _laneSubscription = LaneService.instance.laneStream.listen((data) {
+       if (mounted) setState(() => _laneAdvice = data);
     });
   }
 
@@ -697,6 +706,8 @@ class _MapScreenState extends State<MapScreen> {
     PlatooningService.instance.stop();
     _ghostLockSubscription?.cancel(); // Cancel Ghost Lock
     GhostLockService.instance.stopTracking();
+    _laneSubscription?.cancel(); // Cancel Lane Opt
+    LaneService.instance.stopPolling();
     super.dispose();
   }
 
@@ -865,6 +876,42 @@ class _MapScreenState extends State<MapScreen> {
                   child: const Icon(Icons.gps_off, color: Colors.white),
                 ),
               ),
+
+              // LANE GUIDANCE OVERLAY (Top Center)
+              if (_laneAdvice != null && _laneAdvice!['lane'] != 'CENTER')
+                Positioned(
+                  top: 100,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.blueAccent.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [BoxShadow(color: Colors.blueAccent.withOpacity(0.5), blurRadius: 10)],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _laneAdvice!['lane'] == 'LEFT' ? Icons.arrow_back : Icons.arrow_forward,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            "MERGE ${_laneAdvice!['lane']} (${_laneAdvice!['reason']})",
+                            style: GoogleFonts.montserrat(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              
               MarkerLayer(
                 markers: [
                    // High Risk Zone Icons
