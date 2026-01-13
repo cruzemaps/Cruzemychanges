@@ -939,11 +939,11 @@ class _MapScreenState extends State<MapScreen> {
                 ],
               ),
               
-              // SIGNAL GLIDE OVERLAY (Right Side - Below Buttons)
+              // SIGNAL GLIDE OVERLAY (Rights Side - Integrated below buttons)
               if (_signalData != null)
                 Positioned(
                   top: 350, 
-                  right: 20,
+                  right: 16,
                   child: SignalRing(
                     recommendedSpeed: _signalData!['recommended_speed'] ?? 35,
                     status: _signalData!['state'] ?? "GREEN",
@@ -1265,7 +1265,7 @@ class _MapScreenState extends State<MapScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [ 
                                     Text(
-                                      _currentInstruction ?? "Follow Route",
+                                      _stripXmlTags(_currentInstruction ?? "Follow Route"),
                                       style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                                       overflow: TextOverflow.ellipsis,
                                       maxLines: 2,
@@ -1355,7 +1355,7 @@ class _MapScreenState extends State<MapScreen> {
                if (!isNavigating) return const SizedBox.shrink(); // Hide if not driving
   
                return Positioned(
-                bottom: 20 + MediaQuery.of(context).padding.bottom, // Bottom Corner
+                bottom: 100 + MediaQuery.of(context).padding.bottom, // More clearance for End Trip button
                 right: 20, // Right Aligned
                 child: SafeArea(
                   top: false,
@@ -1569,4 +1569,9 @@ class _MapScreenState extends State<MapScreen> {
     }
     return lanes;
   }
+  // Helper to strip XML tags (e.g. <street>Dolorosa</street>)
+  String _stripXmlTags(String directInstruction) {
+    return directInstruction.replaceAll(RegExp(r'<[^>]*>'), '');
+  }
+
 } // End of State class
