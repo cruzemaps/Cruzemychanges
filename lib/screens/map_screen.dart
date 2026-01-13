@@ -18,6 +18,7 @@ import 'package:cruze_mobile/services/safety_service.dart'; // Import SafetyServ
 import 'package:cruze_mobile/services/navigation_service.dart'; // Import NavigationService
 import 'package:cruze_mobile/services/signal_glide_service.dart'; // Import SignalGlideService
 import 'package:cruze_mobile/widgets/signal_ring.dart'; // Import SignalRing
+import 'package:cruze_mobile/services/platooning_service.dart'; // Import PlatooningService
 import 'package:cruze_mobile/services/ghost_lock_service.dart'; // Import GhostLockService
 import 'package:cruze_mobile/services/lane_service.dart'; // Import LaneService
 import 'package:cruze_mobile/services/black_box_service.dart'; // Import BlackBoxService
@@ -607,6 +608,11 @@ class _MapScreenState extends State<MapScreen> {
     if (defaultTargetPlatform == TargetPlatform.android) return '10.0.2.2';
     return 'localhost';
   }
+  
+  String get _resolvedHost {
+     if (kIsWeb) return "localhost";
+     return defaultTargetPlatform == TargetPlatform.android ? "10.0.2.2" : "127.0.0.1";
+  }
 
   Future<void> _triggerCrash(double gForce) async {
     setState(() {
@@ -768,8 +774,8 @@ class _MapScreenState extends State<MapScreen> {
         }
       }
     } catch (e) {
-```
-  debugPrint("Error fetching incidents: $e");
+    } catch (e) {
+      debugPrint("Error fetching incidents: $e");
     }
   }
   @override
@@ -933,10 +939,10 @@ class _MapScreenState extends State<MapScreen> {
                 ],
               ),
               
-              // SIGNAL GLIDE OVERLAY (Bottom Right)
+              // SIGNAL GLIDE OVERLAY (Right Side - Below Buttons)
               if (_signalData != null)
                 Positioned(
-                  bottom: 120, // Above NavBar
+                  top: 350, 
                   right: 20,
                   child: SignalRing(
                     recommendedSpeed: _signalData!['recommended_speed'] ?? 35,
@@ -982,6 +988,20 @@ class _MapScreenState extends State<MapScreen> {
                       },
                       child: const Icon(Icons.sd_storage, color: Colors.white),
                     ),
+                    const SizedBox(height: 10),
+                    // Recenter Button (Integrated)
+                    if (!_isFollowingUser)
+                      FloatingActionButton.small(
+                        heroTag: "recenter_fab",
+                        onPressed: () {
+                          setState(() {
+                            _isFollowingUser = true;
+                            _mapController.move(_currentPosition, 17.5);
+                          });
+                        },
+                        backgroundColor: const Color(0xFFff791a),
+                        child: const Icon(Icons.my_location, color: Colors.white),
+                      ),
                   ],
                 ),
               ),
@@ -1308,35 +1328,17 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
 
-          // Recenter Button
-          if (!_isFollowingUser)
-             Positioned(
-               bottom: 110 + MediaQuery.of(context).padding.bottom, // Adjusted slightly higher
-               right: 16,
-               child: FloatingActionButton(
-                 heroTag: "recenter_fab",
-                 onPressed: () {
-                   setState(() {
-                     _isFollowingUser = true;
-                     _mapController.move(_currentPosition, 17.5);
-                   });
-                 },
-                 backgroundColor: const Color(0xFFff791a),
-                 child: const Icon(Icons.my_location, color: Colors.white),
-               ),
-             ),
+
              
           // Report Incident Button (Bottom Left)
           ValueListenableBuilder<bool>(
             valueListenable: NavigationService.instance.isNavigating,
             builder: (context, isNavigating, child) {
-              return AnimatedPositioned(
-                 duration: const Duration(milliseconds: 300),
-                 curve: Curves.easeInOut,
-                 // Move to bottom corner (20) when navigating, else keep at 110 (above sheet)
-                 bottom: (isNavigating ? 20 : 110) + MediaQuery.of(context).padding.bottom, 
+               return Positioned(
+                 // Move to Top Left to avoid bottom clutter
+                 top: 140, 
                  left: 16,
-                 child: FloatingActionButton(
+                 child: FloatingActionButton.small(
                    heroTag: "report_fab",
                    onPressed: _showReportDialog,
                    backgroundColor: Colors.redAccent,

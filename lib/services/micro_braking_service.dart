@@ -5,6 +5,10 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class MicroBrakingService {
+  static final MicroBrakingService _instance = MicroBrakingService._internal();
+  static MicroBrakingService get instance => _instance;
+  MicroBrakingService._internal();
+
   StreamSubscription<UserAccelerometerEvent>? _subscription;
   final double _brakingThreshold = 0.3; // g-force
   final int _minDurationMs = 500;

@@ -167,6 +167,7 @@ class _LoginScreenState extends State<LoginScreen> {
     const Color textSecondary = Color(0xFF9CA3AF);
 
     return Scaffold(
+      backgroundColor: Colors.black, // Prevent white flash
       body: Stack(
         children: [
           // Background Image (Cyberpunk / Night City)
