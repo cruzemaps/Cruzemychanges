@@ -239,6 +239,31 @@ def get_signals():
         "recommended_speed": 35 # mph
     }), 200
 
+# Virtual Platooning (Simple Polling Queue)
+platoon_messages = []
+
+@app.route('/api/platoon/message', methods=['POST'])
+def send_platoon_message():
+    data = request.json
+    msg = {
+        "id": random.randint(10000, 99999),
+        "sender": data.get("sender", "Unknown"),
+        "type": data.get("type", "INFO"), # BRAKING, POTHOLE, INFO
+        "content": data.get("content", ""),
+        "timestamp": random.randint(1000000, 9999999) # Mock TS
+    }
+    platoon_messages.append(msg)
+    # Keep last 50
+    if len(platoon_messages) > 50:
+        platoon_messages.pop(0)
+    print(f"[Platoon] 💬 Message: {msg['type']} - {msg['content']}")
+    return jsonify({"status": "sent", "id": msg["id"]}), 200
+
+@app.route('/api/platoon/messages', methods=['GET'])
+def get_platoon_messages():
+    # Return last 10
+    return jsonify({"messages": platoon_messages[-10:]}), 200
+
 @app.route('/api/route', methods=['GET'])
 def get_route():
     start_lat = request.args.get('start_lat')

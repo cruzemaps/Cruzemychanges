@@ -18,6 +18,7 @@ import 'package:cruze_mobile/services/safety_service.dart'; // Import SafetyServ
 import 'package:cruze_mobile/services/navigation_service.dart'; // Import NavigationService
 import 'package:cruze_mobile/services/signal_glide_service.dart'; // Import SignalGlideService
 import 'package:cruze_mobile/widgets/signal_ring.dart'; // Import SignalRing
+import 'package:cruze_mobile/services/platooning_service.dart'; // Import PlatooningService
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -38,6 +39,7 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<Position>? _positionStreamSubscription;
   StreamSubscription<Map<String, dynamic>>? _signalSubscription; // Signal Glide
   Map<String, dynamic>? _signalData;
+  StreamSubscription<List<dynamic>>? _platoonSubscription; // Platooning
 
   bool _crashDetected = false;
   StreamSubscription? _accelerometerSubscription;
@@ -66,6 +68,31 @@ class _MapScreenState extends State<MapScreen> {
         setState(() {
           _signalData = data;
         });
+      }
+    });
+
+    // Start Platooning Service
+    PlatooningService.instance.start();
+    _platoonSubscription = PlatooningService.instance.messagesStream.listen((messages) {
+      if (mounted) {
+        for (var msg in messages) {
+          // Show Alert for High Priority Messages
+          if (msg['type'] == 'BRAKING' || msg['type'] == 'CRASH' || msg['type'] == 'POTHOLE') {
+             ScaffoldMessenger.of(context).showSnackBar(
+               SnackBar(
+                 content: Row(
+                   children: [
+                     Icon(Icons.warning_amber_rounded, color: Colors.white),
+                     SizedBox(width: 10),
+                     Text("${msg['sender']}: ${msg['content']}", style: TextStyle(fontWeight: FontWeight.bold)),
+                   ],
+                 ),
+                 backgroundColor: Colors.redAccent,
+                 duration: Duration(seconds: 3),
+               ),
+             );
+          }
+        }
       }
     });
   }
@@ -640,6 +667,8 @@ class _MapScreenState extends State<MapScreen> {
     _positionStreamSubscription?.cancel();
     _signalSubscription?.cancel(); // Cancel Signal Glide
     SignalGlideService.instance.stopPolling();
+    _platoonSubscription?.cancel(); // Cancel Platooning
+    PlatooningService.instance.stop();
     super.dispose();
   }
 
