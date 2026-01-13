@@ -227,6 +227,12 @@ def braking_event():
     print(f"\n[ALERT] 🛑 MICRO-BRAKING DETECTED! Force: {data.get('force')}g Duration: {data.get('duration')}ms")
     return jsonify({"status": "alert_logged"}), 200
 
+@app.route('/api/telemetry/pothole', methods=['POST'])
+def pothole_event():
+    data = request.json
+    print(f"\n[SEISMOGRAPH] 🕳️ POTHOLE DETECTED! Severity: {data.get('severity')}g Location: {data.get('lat')}, {data.get('lon')}")
+    return jsonify({"status": "mapped"}), 200
+
 # Mock SPaT Data (Signal Phase and Timing)
 @app.route('/api/signals', methods=['GET'])
 def get_signals():
