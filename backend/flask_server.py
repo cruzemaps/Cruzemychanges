@@ -33,6 +33,7 @@ else:
     print("⚠️ COSMOS DB DISABLED: Connection String Missing (Using Local Files)")
 
 DATABASE_NAME = "CruzeDB"
+CONTAINER_NAME = "CruzeDB"
 
 def get_container(container_name):
     if not COSMOS_CONNECTION_STRING:
@@ -55,66 +56,12 @@ def get_container(container_name):
         print(f"Error connecting to Cosmos DB ({container_name}): {e}")
         return None
 
-# Persistence
-DB_FILE = "users.json"
+# Persistence - COSMOS DB ONLY
+def get_user_container():
+    return get_container("users")
 
-def load_users():
-    # Try Cosmos DB first
-    container = get_container("users")
-    if container:
-        try:
-            items = list(container.read_all_items())
-            users_dict = {}
-            for item in items:
-                # Map Cosmos item back to local structure
-                email = item.get('id')
-                if email:
-                    users_dict[email] = {
-                        'password': item.get('password'),
-                        'name': item.get('name'),
-                        'safety_score': item.get('safety_score', 100), # Default 100
-                        'profile_picture_url': item.get('profile_picture_url')
-                    }
-            return users_dict
-        except Exception as e:
-            print(f"Error loading users from Cosmos: {e}")
-            # Fallback? No, if configured, respect it.
-            return {}
-
-    # Fallback to Local File
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, 'r') as f: return json.load(f)
-        except: pass
-    return {}
-
-def save_users(users):
-    container = get_container("users")
-    if container:
-        # Cosmos DB Strategy: Upsert each user
-        # Note: This is inefficient for bulk but fine for this demo's load.
-        # Ideally we only save the CHANGED user.
-        for email, data in users.items():
-            item = {
-                'id': email,
-                'password': data.get('password'),
-                'name': data.get('name'),
-                'safety_score': data.get('safety_score', 100),
-                'profile_picture_url': data.get('profile_picture_url')
-            }
-            try:
-                container.upsert_item(item)
-            except Exception as e:
-                print(f"Error saving user {email} to Cosmos: {e}")
-        return
-
-    with open(DB_FILE, 'w') as f: json.dump(users, f)
-
-# High Risk Zones
-HIGH_RISK_ZONES = [
-    {"name": "Alamo Plaza", "lat": 29.4241, "lon": -98.4936},
-    {"name": "E Houston St & N Alamo St", "lat": 29.4260, "lon": -98.4861}
-]
+def get_incident_container():
+    return get_container("incidents")
 
 # --- ROUTES ---
 
@@ -128,15 +75,33 @@ def signup():
     if not email or not password:
         return jsonify({"error": "Missing fields"}), 400
         
-    users = load_users()
-    if email in users:
+    container = get_user_container()
+    if not container:
+        return jsonify({"error": "Database unavailable"}), 500
+
+    # check if exists
+    try:
+        container.read_item(item=email, partition_key=email)
         return jsonify({"error": "User exists"}), 409
+    except Exception:
+        # Item not found, safe to create
+        pass
         
-    users[email] = {'password': password, 'name': name, 'safety_score': 100} # Default 100
-    save_users(users)
+    new_user = {
+        'id': email,
+        'password': password,
+        'name': name,
+        'safety_score': 100,
+        'profile_picture_url': None
+    }
     
-    print(f"User Created: {email}")
-    return jsonify({"status": "success", "message": "User created"}), 200
+    try:
+        container.create_item(new_user)
+        print(f"User Created: {email}")
+        return jsonify({"status": "success", "message": "User created"}), 201
+    except Exception as e:
+        print(f"Error creating user: {e}")
+        return jsonify({"error": "Database error"}), 500
 
 @app.route('/api/update_profile', methods=['POST'])
 def update_profile():
@@ -147,16 +112,17 @@ def update_profile():
     if not email or not name:
         return jsonify({"error": "Missing fields"}), 400
         
-    users = load_users()
-    if email not in users:
-        return jsonify({"error": "User not found"}), 404
+    container = get_user_container()
+    if not container: return jsonify({"error": "Database unavailable"}), 500
         
-    # Update Name
-    users[email]['name'] = name
-    save_users(users)
-    
-    print(f"User Updated: {email} -> {name}")
-    return jsonify({"status": "success", "message": "Profile updated"}), 200
+    try:
+        user = container.read_item(item=email, partition_key=email)
+        user['name'] = name
+        container.upsert_item(user)
+        print(f"User Updated: {email} -> {name}")
+        return jsonify({"status": "success", "message": "Profile updated"}), 200
+    except Exception as e:
+        return jsonify({"error": "User not found or DB error"}), 404
 
 @app.route('/api/upload_avatar', methods=['POST'])
 def upload_avatar():
@@ -170,19 +136,20 @@ def upload_avatar():
         return jsonify({"error": "No selected file or email missing"}), 400
         
     if file:
-        filename = secure_filename(f"{email}_avatar.png") # Force png or keep extension
+        filename = secure_filename(f"{email}_avatar.png")
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Generate URL (assuming localhost access for now)
-        # In production, this would be a blob storage URL
         file_url = f"/static/uploads/{filename}"
         
-        # Update User Record
-        users = load_users()
-        if email in users:
-            users[email]['profile_picture_url'] = file_url
-            save_users(users)
+        container = get_user_container()
+        if container:
+            try:
+                user = container.read_item(item=email, partition_key=email)
+                user['profile_picture_url'] = file_url
+                container.upsert_item(user)
+            except Exception as e:
+                print(f"Error updating avatar in DB: {e}")
             
         print(f"Avatar Uploaded: {email} -> {filepath}")
         return jsonify({"status": "success", "url": file_url}), 200
@@ -193,17 +160,22 @@ def login():
     email = data.get('email')
     password = data.get('password')
     
-    users = load_users()
-    user = users.get(email)
+    container = get_user_container()
+    if not container: return jsonify({"error": "Database unavailable"}), 500
     
-    if user and user['password'] == password:
-        print(f"Login Success: {email}")
-        return jsonify({
-            "status": "success", 
-            "name": user['name'],
-            "safety_score": user.get('safety_score', 100),
-            "profile_picture_url": user.get('profile_picture_url')
-        }), 200
+    try:
+        user = container.read_item(item=email, partition_key=email)
+        if user['password'] == password:
+            print(f"Login Success: {email}")
+            return jsonify({
+                "status": "success", 
+                "name": user.get('name', 'Driver'),
+                "safety_score": user.get('safety_score', 100),
+                "profile_picture_url": user.get('profile_picture_url')
+            }), 200
+    except Exception:
+        # User not found
+        pass
     
     return jsonify({"error": "Invalid credentials"}), 401
 
@@ -416,42 +388,6 @@ def get_speed_limit_endpoint():
     result = get_speed_limit_data(lat, lon)
     return jsonify(result), 200
 
-# --- INCIDENT REPORTING ---
-INCIDENTS_FILE = "incidents.json"
-
-def load_incidents():
-    container = get_container("incidents")
-    if container:
-        try:
-            items = list(container.read_all_items())
-            # Convert system properties if needed, but returning dicts is fine
-            return items
-        except Exception as e:
-             print(f"Error loading incidents from Cosmos: {e}")
-             return []
-
-    if os.path.exists(INCIDENTS_FILE):
-        try:
-            with open(INCIDENTS_FILE, 'r') as f: return json.load(f)
-        except: pass
-    return []
-
-def save_incidents(incidents):
-    container = get_container("incidents")
-    if container:
-        for incident in incidents:
-            # Ensure ID is string for Cosmos
-            if 'id' in incident:
-                incident['id'] = str(incident['id'])
-            
-            try:
-                container.upsert_item(incident)
-            except Exception as e:
-                print(f"Error saving incident to Cosmos: {e}")
-        return
-
-    with open(INCIDENTS_FILE, 'w') as f: json.dump(incidents, f)
-
 @app.route('/api/report_incident', methods=['POST'])
 def report_incident():
     data = request.json
@@ -463,9 +399,11 @@ def report_incident():
     if not lat or not lon or not i_type:
         return jsonify({"error": "Missing fields"}), 400
         
-    incidents = load_incidents()
+    container = get_incident_container()
+    if not container: return jsonify({"error": "Database unavailable"}), 500
+
     new_incident = {
-        "id": random.randint(1000, 9999), # Simple ID
+        "id": str(random.randint(1000, 9999)), # ID must be string
         "lat": lat,
         "lon": lon,
         "type": i_type,
@@ -473,16 +411,29 @@ def report_incident():
         "timestamp": "Now" # In real app use datetime
     }
     
-    incidents.append(new_incident)
-    save_incidents(incidents)
-    
-    print(f"[Incident] New Report: {i_type} at {lat}, {lon}")
-    return jsonify({"status": "success", "id": new_incident["id"]}), 200
+    try:
+        container.create_item(new_incident)
+        print(f"[Incident] New Report: {i_type} at {lat}, {lon}")
+        return jsonify({"status": "success", "id": new_incident["id"]}), 201
+    except Exception as e:
+        print(f"Error saving incident: {e}")
+        return jsonify({"error": "DB Error"}), 500
 
 @app.route('/api/incidents', methods=['GET'])
 def get_incidents():
-    incidents = load_incidents()
-    return jsonify({"incidents": incidents}), 200
+    container = get_incident_container()
+    if not container: return jsonify({"error": "Database unavailable"}), 500
+    
+    try:
+        # Simple query to get all items
+        items = list(container.query_items(
+            query="SELECT * FROM c",
+            enable_cross_partition_query=True
+        ))
+        return jsonify({"incidents": items}), 200
+    except Exception as e:
+        print(f"Error fetching incidents: {e}")
+        return jsonify({"incidents": []}), 200
 
 if __name__ == '__main__':
     print("Starting Cruze Backend (Flask Emulation) on port 7071...")
