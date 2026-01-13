@@ -1,3 +1,6 @@
 azure-functions
 azure-cosmos
 requests
+flask
+flask-cors
+python-dotenv
