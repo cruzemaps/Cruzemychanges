@@ -246,6 +246,16 @@ def blackbox_upload():
     print(f"\n[BLACK BOX] 📦 FORENSIC LOG RECEIVED! Events: {len(data.get('log', []))} Timestamp: {data.get('timestamp')}")
     return jsonify({"status": "secured", "url": "https://azure.blob/forensics/log_123.json"}), 200
 
+@app.route('/api/roads/curvature', methods=['GET'])
+def get_curvature():
+    # Mocking a sharp curve nearby
+    # In reality: lookup based on lat/lon in Azure Maps Data
+    return jsonify({
+        "radius": 40.0, # meters (Sharp Turn)
+        "bank_angle": 5.0, # degrees
+        "safe_speed": 25.0 # mph
+    }), 200
+
 
 # Mock SPaT Data (Signal Phase and Timing)
 @app.route('/api/signals', methods=['GET'])

@@ -21,6 +21,7 @@ import 'package:cruze_mobile/widgets/signal_ring.dart'; // Import SignalRing
 import 'package:cruze_mobile/services/ghost_lock_service.dart'; // Import GhostLockService
 import 'package:cruze_mobile/services/lane_service.dart'; // Import LaneService
 import 'package:cruze_mobile/services/black_box_service.dart'; // Import BlackBoxService
+import 'package:cruze_mobile/services/rollover_service.dart'; // Import RolloverService
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -48,6 +49,9 @@ class _MapScreenState extends State<MapScreen> {
   bool _ghostLockActive = false;
   bool _winterMode = false;
   bool _isTruck = false;
+  
+  StreamSubscription<bool>? _rolloverSubscription; // Rollover Alert
+  bool _rolloverRisk = false;
 
   bool _crashDetected = false;
   StreamSubscription? _accelerometerSubscription;
@@ -201,6 +205,17 @@ class _MapScreenState extends State<MapScreen> {
     LaneService.instance.startPolling(_initialCenter);
     _laneSubscription = LaneService.instance.laneStream.listen((data) {
        if (mounted) setState(() => _laneAdvice = data);
+    });
+
+    // Rollover Service
+    RolloverService.instance.startMonitoring();
+    _rolloverSubscription = RolloverService.instance.alertStream.listen((risk) {
+       if (mounted) {
+          if (risk != _rolloverRisk) {
+            if (risk) HapticFeedback.heavyImpact();
+            setState(() => _rolloverRisk = risk);
+          }
+       }
     });
   }
 
@@ -634,11 +649,7 @@ class _MapScreenState extends State<MapScreen> {
               _buildReportOption("FLAT TIRE", Icons.tire_repair, Colors.orange),
               const SizedBox(height: 8),
               _buildReportOption("STOPPED CAR", Icons.warning, Colors.yellow),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text("CANCEL", style: TextStyle(color: Colors.grey)),
-              )
+
             ],
           ),
         ),
@@ -757,11 +768,13 @@ class _MapScreenState extends State<MapScreen> {
         }
       }
     } catch (e) {
-      debugPrint("Error fetching incidents: $e");
+```
+  debugPrint("Error fetching incidents: $e");
     }
   }
   @override
   void dispose() {
+    _mapController.dispose();
     _accelerometerSubscription?.cancel();
     _positionStreamSubscription?.cancel();
     _signalSubscription?.cancel(); // Cancel Signal Glide
@@ -772,6 +785,8 @@ class _MapScreenState extends State<MapScreen> {
     GhostLockService.instance.stopTracking();
     _laneSubscription?.cancel(); // Cancel Lane Opt
     LaneService.instance.stopPolling();
+    _rolloverSubscription?.cancel();
+    RolloverService.instance.stopMonitoring();
     super.dispose();
   }
 
@@ -1425,6 +1440,37 @@ class _MapScreenState extends State<MapScreen> {
                     child: const Text('I AM OKAY'),
                   ),
                 ],
+              ),
+            ),
+          
+          // ROLLOVER WARNING OVERLAY
+          if (_rolloverRisk)
+            Positioned.fill(
+              child: Container(
+                color: Colors.red.withOpacity(0.6),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.warning_amber_rounded, size: 100, color: Colors.white),
+                      Text("ROLLOVER RISK!", 
+                         style: GoogleFonts.montserrat(
+                           fontSize: 32, 
+                           fontWeight: FontWeight.w900, 
+                           color: Colors.white,
+                           shadows: [Shadow(color: Colors.black, blurRadius: 10)]
+                         )
+                      ),
+                      Text("SLOW DOWN", 
+                         style: GoogleFonts.montserrat(
+                           fontSize: 48, 
+                           fontWeight: FontWeight.w900, 
+                           color: Colors.yellowAccent
+                         )
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
         ],

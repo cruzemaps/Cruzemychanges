@@ -13,6 +13,7 @@ import 'package:cruze_mobile/services/micro_braking_service.dart';
 import 'package:cruze_mobile/services/pothole_service.dart'; // Import PotholeService
 import 'package:cruze_mobile/services/diagnostics_service.dart'; // Import DiagnosticsService
 import 'package:cruze_mobile/services/black_box_service.dart'; // Import BlackBoxService
+import 'package:cruze_mobile/services/rollover_service.dart'; // Import RolloverService
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,7 @@ Future<void> main() async {
   PotholeService.instance.startMonitoring();
   DiagnosticsService.instance.startMonitoring();
   BlackBoxService.instance.startRecording();
+  RolloverService.instance.startMonitoring();
   
   runApp(const CruzeApp());
 }
