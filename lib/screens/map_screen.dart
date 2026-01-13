@@ -45,6 +45,7 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<Map<String, dynamic>>? _laneSubscription; // Lane Opt
   Map<String, dynamic>? _laneAdvice;
   bool _ghostLockActive = false;
+  bool _winterMode = false;
 
   bool _crashDetected = false;
   StreamSubscription? _accelerometerSubscription;
@@ -64,6 +65,22 @@ class _MapScreenState extends State<MapScreen> {
     } else {
       GhostLockService.instance.stopTracking();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("GPS RESTORED"), backgroundColor: Colors.green));
+    }
+  }
+
+  void _toggleWinterMode() {
+    setState(() {
+       _winterMode = !_winterMode;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_winterMode ? "❄️ WINTER MODE ON: Avoiding Icy Roads" : "☀️ WINTER MODE OFF"),
+        backgroundColor: _winterMode ? Colors.lightBlue : Colors.orange,
+      )
+    );
+     // Re-fetch route if destination exists
+    if (_destination != null) {
+       _fetchRealRoute(_currentPosition, _destination!);
     }
   }
 
@@ -418,10 +435,11 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _fetchRealRoute(LatLng start, LatLng end) async {
     final String query = '${start.latitude},${start.longitude}:${end.latitude},${end.longitude}';
-    // Added instructionsType=text to get guidance
+    String icyParam = _winterMode ? "&avoid_icy=true" : "";
+    
     final Uri uri = Uri.parse(
-        'https://atlas.microsoft.com/route/directions/json?api-version=1.0&query=$query&subscription-key=$azureKey&routeRepresentation=polyline&instructionsType=text');
-
+        'http://$_resolvedHost:7071/api/route?start_lat=${start.latitude}&start_lon=${start.longitude}&end_lat=${end.latitude}&end_lon=${end.longitude}$icyParam');
+        
     try {
       final response = await http.get(uri);
       if (response.statusCode == 200) {
@@ -430,50 +448,40 @@ class _MapScreenState extends State<MapScreen> {
         if (routes.isNotEmpty) {
           final legs = routes[0]['legs'] as List;
           final points = <LatLng>[];
-          
-          // Basic summary for distance
           if (data['routes'][0]['summary'] != null) {
               final lengthInMeters = data['routes'][0]['summary']['lengthInMeters'];
               final miles = (lengthInMeters * 0.000621371).toStringAsFixed(1);
               if (mounted) {
-                 // Haptic Heartbeat: Medium Impact for SAFE ROUTE FOUND
                  HapticFeedback.mediumImpact();
-                 
                  setState(() {
                    _routeDistance = "$miles mi";
                  });
               }
           }
-          
-          // Get first instruction if available
           String? instruction;
           if (data['routes'][0]['guidance'] != null && 
               data['routes'][0]['guidance']['instructions'] != null) {
              final instructions = data['routes'][0]['guidance']['instructions'] as List;
              if (instructions.isNotEmpty) {
-               instruction = instructions[0]['message']; // e.g. "Turn right on Main St"
-               // Some instructions have 'turnAngleInDecimalDegrees' or 'maneuver'
+               instruction = instructions[0]['message'];
              }
           }
-          // Fallback if structure differs or is empty
           if (instruction == null && legs.isNotEmpty) {
-             // Mock one for "Real App" feel if API doesn't return simple text
              instruction = "Head north towards destination";
           }
-
           for (var leg in legs) {
             final pointsData = leg['points'] as List;
             for (var point in pointsData) {
               points.add(LatLng(point['latitude'], point['longitude']));
             }
           }
-
           if (mounted) {
             setState(() {
               _routePoints = points;
               _currentInstruction = instruction;
-              _updateSpeedLimit(); // Trigger speed limit update on new route
             });
+            // Auto-start nav for demo
+            _startDriveMode();
           }
         }
       } else {
@@ -870,10 +878,23 @@ class _MapScreenState extends State<MapScreen> {
               Positioned(
                 top: 60,
                 right: 20,
-                child: FloatingActionButton.small(
-                  backgroundColor: _ghostLockActive ? Colors.purpleAccent : Colors.grey[800],
-                  onPressed: _toggleGhostLock,
-                  child: const Icon(Icons.gps_off, color: Colors.white),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FloatingActionButton.small(
+                      heroTag: "ghost_lock",
+                      backgroundColor: _ghostLockActive ? Colors.purpleAccent : Colors.grey[800],
+                      onPressed: _toggleGhostLock,
+                      child: const Icon(Icons.gps_off, color: Colors.white),
+                    ),
+                    const SizedBox(height: 10),
+                    FloatingActionButton.small(
+                      heroTag: "winter_mode",
+                      backgroundColor: _winterMode ? Colors.lightBlue : Colors.grey[800],
+                      onPressed: _toggleWinterMode,
+                      child: const Icon(Icons.ac_unit, color: Colors.white),
+                    ),
+                  ],
                 ),
               ),
 

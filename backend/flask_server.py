@@ -284,11 +284,12 @@ def get_route():
     start_lon = request.args.get('start_lon')
     end_lat = request.args.get('end_lat')
     end_lon = request.args.get('end_lon')
+    avoid_icy = request.args.get('avoid_icy', 'false').lower() == 'true'
     
     if not all([start_lat, start_lon, end_lat, end_lon]):
         return jsonify({"error": "Missing coords"}), 400
 
-    print(f"[Route] Calculating Safe Route: {start_lat},{start_lon} -> {end_lat},{end_lon}")
+    print(f"[Route] Calculating Safe Route: {start_lat},{start_lon} -> {end_lat},{end_lon} (Icy Avoid: {avoid_icy})")
     
     # Real Proxy to Azure Maps
     query = f"{start_lat},{start_lon}:{end_lat},{end_lon}"
