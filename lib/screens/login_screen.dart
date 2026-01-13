@@ -57,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }),
       );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         if (!mounted) return;
         
         // Parse User Data
