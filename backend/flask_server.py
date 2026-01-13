@@ -233,6 +233,13 @@ def pothole_event():
     print(f"\n[SEISMOGRAPH] 🕳️ POTHOLE DETECTED! Severity: {data.get('severity')}g Location: {data.get('lat')}, {data.get('lon')}")
     return jsonify({"status": "mapped"}), 200
 
+@app.route('/api/diagnostics/log', methods=['POST'])
+def diagnostics_log():
+    data = request.json
+    print(f"\n[SONIC] 🔊 VIBRATION ANOMALY! Jerk Score: {data.get('score')} (Threshold: {data.get('threshold')})")
+    return jsonify({"status": "logged", "advice": "Check Suspension"}), 200
+
+
 # Mock SPaT Data (Signal Phase and Timing)
 @app.route('/api/signals', methods=['GET'])
 def get_signals():
