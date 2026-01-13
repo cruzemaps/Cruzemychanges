@@ -219,6 +219,14 @@ def telemetry():
         
     return jsonify({"status": "received"}), 200
 
+@app.route('/api/telemetry/braking', methods=['POST'])
+def braking_event():
+    data = request.json
+    # Simulate Stream Analytics logic
+    # In a real app, we'd window these events.
+    print(f"\n[ALERT] 🛑 MICRO-BRAKING DETECTED! Force: {data.get('force')}g Duration: {data.get('duration')}ms")
+    return jsonify({"status": "alert_logged"}), 200
+
 @app.route('/api/route', methods=['GET'])
 def get_route():
     start_lat = request.args.get('start_lat')

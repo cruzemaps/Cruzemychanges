@@ -9,9 +9,16 @@ import 'package:cruze_mobile/services/navigation_service.dart'; // Import Naviga
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 
+import 'package:cruze_mobile/services/micro_braking_service.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
+  
+  // Start Services
+  final microBrakingService = MicroBrakingService();
+  microBrakingService.startMonitoring();
+  
   runApp(const CruzeApp());
 }
 
