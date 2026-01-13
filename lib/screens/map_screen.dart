@@ -112,6 +112,43 @@ class _MapScreenState extends State<MapScreen> {
     _platoonSubscription = PlatooningService.instance.messagesStream.listen((messages) {
       if (mounted) {
         for (var msg in messages) {
+          // BLUE WAVE: AMBULANCE ALERT
+          if (msg['type'] == 'AMBULANCE') {
+             // Show Full Screen Alert
+             showDialog(
+               context: context, 
+               barrierDismissible: false,
+               builder: (context) => Dialog(
+                 backgroundColor: Colors.transparent,
+                 child: Container(
+                   padding: const EdgeInsets.all(20),
+                   decoration: BoxDecoration(
+                     color: Colors.blueAccent.withOpacity(0.9),
+                     borderRadius: BorderRadius.circular(20),
+                     boxShadow: [BoxShadow(color: Colors.blue, blurRadius: 30, spreadRadius: 10)],
+                   ),
+                   child: Column(
+                     mainAxisSize: MainAxisSize.min,
+                     children: [
+                       Icon(Icons.emergency, color: Colors.white, size: 60),
+                       SizedBox(height: 20),
+                       Text("THE BLUE WAVE", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                       SizedBox(height: 10),
+                       Text("Ambulance Approaching", style: GoogleFonts.montserrat(color: Colors.white70, fontSize: 16)),
+                       Text("PULL OVER TO RIGHT", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+                       SizedBox(height: 20),
+                       ElevatedButton(
+                         onPressed: () => Navigator.pop(context),
+                         style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.blueAccent),
+                         child: Text("I HAVE PULLED OVER"),
+                       )
+                     ],
+                   ),
+                 ),
+               )
+             );
+          }
+          
           // Show Alert for High Priority Messages
           if (msg['type'] == 'BRAKING' || msg['type'] == 'CRASH' || msg['type'] == 'POTHOLE') {
              ScaffoldMessenger.of(context).showSnackBar(
