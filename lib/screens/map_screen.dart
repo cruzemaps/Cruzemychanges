@@ -16,6 +16,8 @@ import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 import 'package:cruze_mobile/widgets/glass_card.dart'; // Import GlassCard
 import 'package:cruze_mobile/services/safety_service.dart'; // Import SafetyService
 import 'package:cruze_mobile/services/navigation_service.dart'; // Import NavigationService
+import 'package:cruze_mobile/services/signal_glide_service.dart'; // Import SignalGlideService
+import 'package:cruze_mobile/widgets/signal_ring.dart'; // Import SignalRing
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -34,6 +36,8 @@ class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
   LatLng _currentPosition = _initialCenter;
   StreamSubscription<Position>? _positionStreamSubscription;
+  StreamSubscription<Map<String, dynamic>>? _signalSubscription; // Signal Glide
+  Map<String, dynamic>? _signalData;
 
   bool _crashDetected = false;
   StreamSubscription? _accelerometerSubscription;
@@ -53,6 +57,16 @@ class _MapScreenState extends State<MapScreen> {
     _fetchIncidents();
     Timer.periodic(const Duration(seconds: 5), (timer) {
       if (mounted) _fetchIncidents();
+    });
+    
+    // Start Signal Glide Service
+    SignalGlideService.instance.startPolling(_initialCenter);
+    _signalSubscription = SignalGlideService.instance.signalStream.listen((data) {
+      if (mounted) {
+        setState(() {
+          _signalData = data;
+        });
+      }
     });
   }
 
@@ -624,6 +638,8 @@ class _MapScreenState extends State<MapScreen> {
   void dispose() {
     _accelerometerSubscription?.cancel();
     _positionStreamSubscription?.cancel();
+    _signalSubscription?.cancel(); // Cancel Signal Glide
+    SignalGlideService.instance.stopPolling();
     super.dispose();
   }
 
@@ -747,6 +763,7 @@ class _MapScreenState extends State<MapScreen> {
               PolylineLayer(
                 polylines: [
                   if (_routePoints.isNotEmpty) ...[
+                    // ... existing polylines ...
                     // Glow Layer 1 (Outer Blur)
                     Polyline(
                       points: _routePoints,
@@ -768,6 +785,18 @@ class _MapScreenState extends State<MapScreen> {
                   ],
                 ],
               ),
+              
+              // SIGNAL GLIDE OVERLAY (Bottom Right)
+              if (_signalData != null)
+                Positioned(
+                  bottom: 120, // Above NavBar
+                  right: 20,
+                  child: SignalRing(
+                    recommendedSpeed: _signalData!['recommended_speed'] ?? 35,
+                    status: _signalData!['state'] ?? "GREEN",
+                    timeToGreen: (_signalData!['time_to_green'] ?? 0).toDouble(),
+                  ),
+                ),
               MarkerLayer(
                 markers: [
                    // High Risk Zone Icons

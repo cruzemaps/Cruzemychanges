@@ -227,6 +227,18 @@ def braking_event():
     print(f"\n[ALERT] 🛑 MICRO-BRAKING DETECTED! Force: {data.get('force')}g Duration: {data.get('duration')}ms")
     return jsonify({"status": "alert_logged"}), 200
 
+# Mock SPaT Data (Signal Phase and Timing)
+@app.route('/api/signals', methods=['GET'])
+def get_signals():
+    # In reality: Query City DOT API based on lat/lon
+    # Mocking a signal 500m ahead
+    return jsonify({
+        "next_signal_dist": 500, # meters
+        "time_to_green": random.randint(5, 30), # seconds remaining on RED
+        "state": "RED" if random.random() > 0.5 else "GREEN",
+        "recommended_speed": 35 # mph
+    }), 200
+
 @app.route('/api/route', methods=['GET'])
 def get_route():
     start_lat = request.args.get('start_lat')
