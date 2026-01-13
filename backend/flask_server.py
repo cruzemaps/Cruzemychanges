@@ -291,17 +291,20 @@ def get_route():
     end_lat = request.args.get('end_lat')
     end_lon = request.args.get('end_lon')
     avoid_icy = request.args.get('avoid_icy', 'false').lower() == 'true'
+    is_truck = request.args.get('is_truck', 'false').lower() == 'true'
     
     if not all([start_lat, start_lon, end_lat, end_lon]):
         return jsonify({"error": "Missing coords"}), 400
 
-    print(f"[Route] Calculating Safe Route: {start_lat},{start_lon} -> {end_lat},{end_lon} (Icy Avoid: {avoid_icy})")
+    print(f"[Route] Calculating Safe Route: {start_lat},{start_lon} -> {end_lat},{end_lon} (Icy: {avoid_icy}, Truck: {is_truck})")
     
     # Real Proxy to Azure Maps
     query = f"{start_lat},{start_lon}:{end_lat},{end_lon}"
-    # Adding Truck Constraints (Vertical Slice Requirement)
-    # Standard Semi Dimensions: 2.6m width, 4.1m height, 22m length, 36T weight
-    truck_params = "&travelMode=truck&vehicleWidth=2.6&vehicleHeight=4.1&vehicleLength=22.0&vehicleWeight=36000"
+    
+    # Dynamic Truck Params
+    truck_params = ""
+    if is_truck:
+        truck_params = "&travelMode=truck&vehicleWidth=2.6&vehicleHeight=4.1&vehicleLength=22.0&vehicleWeight=36000"
     
     # Risk Avoidance (Hackathon Winner Feature)
     # Avoiding rectangular area covering the mocked "High Risk Zones"

@@ -46,6 +46,7 @@ class _MapScreenState extends State<MapScreen> {
   Map<String, dynamic>? _laneAdvice;
   bool _ghostLockActive = false;
   bool _winterMode = false;
+  bool _isTruck = false;
 
   bool _crashDetected = false;
   StreamSubscription? _accelerometerSubscription;
@@ -76,6 +77,22 @@ class _MapScreenState extends State<MapScreen> {
       SnackBar(
         content: Text(_winterMode ? "❄️ WINTER MODE ON: Avoiding Icy Roads" : "☀️ WINTER MODE OFF"),
         backgroundColor: _winterMode ? Colors.lightBlue : Colors.orange,
+      )
+    );
+     // Re-fetch route if destination exists
+    if (_destination != null) {
+       _fetchRealRoute(_currentPosition, _destination!);
+    }
+  }
+
+  void _toggleTruckMode() {
+    setState(() {
+       _isTruck = !_isTruck;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_isTruck ? "🚛 TRUCK MODE ON: Height Restricted Routing" : "🚗 TRUCK MODE OFF"),
+        backgroundColor: _isTruck ? Colors.indigo : Colors.blueGrey,
       )
     );
      // Re-fetch route if destination exists
@@ -473,9 +490,10 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _fetchRealRoute(LatLng start, LatLng end) async {
     final String query = '${start.latitude},${start.longitude}:${end.latitude},${end.longitude}';
     String icyParam = _winterMode ? "&avoid_icy=true" : "";
+    String truckParam = _isTruck ? "&is_truck=true" : "";
     
     final Uri uri = Uri.parse(
-        'http://$_resolvedHost:7071/api/route?start_lat=${start.latitude}&start_lon=${start.longitude}&end_lat=${end.latitude}&end_lon=${end.longitude}$icyParam');
+        'http://$_resolvedHost:7071/api/route?start_lat=${start.latitude}&start_lon=${start.longitude}&end_lat=${end.latitude}&end_lon=${end.longitude}$icyParam$truckParam');
         
     try {
       final response = await http.get(uri);
@@ -930,6 +948,13 @@ class _MapScreenState extends State<MapScreen> {
                       backgroundColor: _winterMode ? Colors.lightBlue : Colors.grey[800],
                       onPressed: _toggleWinterMode,
                       child: const Icon(Icons.ac_unit, color: Colors.white),
+                    ),
+                    const SizedBox(height: 10),
+                    FloatingActionButton.small(
+                      heroTag: "truck_mode",
+                      backgroundColor: _isTruck ? Colors.indigo : Colors.grey[800],
+                      onPressed: _toggleTruckMode,
+                      child: const Icon(Icons.local_shipping, color: Colors.white),
                     ),
                   ],
                 ),
