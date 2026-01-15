@@ -35,8 +35,9 @@ class _MapScreenState extends State<MapScreen> {
   // San Antonio coordinates
   static const LatLng _initialCenter = LatLng(29.4241, -98.4936);
   
-  static final String azureKey = dotenv.env['AZURE_MAPS_KEY'] ?? '';
-  
+  // Hardcoded for Hackathon Speed - env var issues persisted
+  static const String azureKey = "REDACTED_AZURE_MAPS_KEY";
+
   // State
   final MapController _mapController = MapController();
   LatLng _currentPosition = _initialCenter;
@@ -68,10 +69,10 @@ class _MapScreenState extends State<MapScreen> {
     
     if (_ghostLockActive) {
       GhostLockService.instance.startTracking(_currentPosition);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("👻 GHOST LOCK ENGAGED: GPS DENIED"), backgroundColor: Colors.purpleAccent));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("👻 GHOST LOCK ENGAGED: GPS DENIED"), backgroundColor: Colors.purpleAccent));
     } else {
       GhostLockService.instance.stopTracking();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("GPS RESTORED"), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("GPS RESTORED"), backgroundColor: Colors.green));
     }
   }
 
@@ -148,22 +149,22 @@ class _MapScreenState extends State<MapScreen> {
                    decoration: BoxDecoration(
                      color: Colors.blueAccent.withOpacity(0.9),
                      borderRadius: BorderRadius.circular(20),
-                     boxShadow: [BoxShadow(color: Colors.blue, blurRadius: 30, spreadRadius: 10)],
+                     boxShadow: const [BoxShadow(color: Colors.blue, blurRadius: 30, spreadRadius: 10)],
                    ),
                    child: Column(
                      mainAxisSize: MainAxisSize.min,
                      children: [
-                       Icon(Icons.emergency, color: Colors.white, size: 60),
-                       SizedBox(height: 20),
+                       const Icon(Icons.emergency, color: Colors.white, size: 60),
+                       const SizedBox(height: 20),
                        Text("THE BLUE WAVE", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                       SizedBox(height: 10),
+                       const SizedBox(height: 10),
                        Text("Ambulance Approaching", style: GoogleFonts.montserrat(color: Colors.white70, fontSize: 16)),
                        Text("PULL OVER TO RIGHT", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-                       SizedBox(height: 20),
+                       const SizedBox(height: 20),
                        ElevatedButton(
                          onPressed: () => Navigator.pop(context),
                          style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.blueAccent),
-                         child: Text("I HAVE PULLED OVER"),
+                         child: const Text("I HAVE PULLED OVER"),
                        )
                      ],
                    ),
@@ -178,13 +179,13 @@ class _MapScreenState extends State<MapScreen> {
                SnackBar(
                  content: Row(
                    children: [
-                     Icon(Icons.warning_amber_rounded, color: Colors.white),
-                     SizedBox(width: 10),
-                     Text("${msg['sender']}: ${msg['content']}", style: TextStyle(fontWeight: FontWeight.bold)),
+                     const Icon(Icons.warning_amber_rounded, color: Colors.white),
+                     const SizedBox(width: 10),
+                     Text("${msg['sender']}: ${msg['content']}", style: const TextStyle(fontWeight: FontWeight.bold)),
                    ],
                  ),
                  backgroundColor: Colors.redAccent,
-                 duration: Duration(seconds: 3),
+                 duration: const Duration(seconds: 3),
                ),
              );
           }
@@ -245,8 +246,8 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     const LocationSettings locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation, // Optimized for driving
-      distanceFilter: 5, // Update every 5 meters (Reduces jitter/lag)
+      accuracy: LocationAccuracy.bestForNavigation, 
+      distanceFilter: 0, // Set to 0 to see EVERY modification (even noise) for "lively" feel on simulator
     );
     
     // 1. Get Immediate Fix (Live Location)
