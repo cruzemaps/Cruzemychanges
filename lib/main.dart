@@ -17,7 +17,7 @@ import 'package:cruze_mobile/services/rollover_service.dart'; // Import Rollover
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
+  await dotenv.load(fileName: "env/.env");
   
   // Start Services
   MicroBrakingService.instance.startMonitoring();

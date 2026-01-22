@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../config/app_config.dart';
 
 class UserService {
   static final UserService instance = UserService._internal();
@@ -36,9 +37,7 @@ class UserService {
      final String userEmail = email.value;
      if (userEmail.isEmpty) return;
      
-     final String baseUrl = defaultTargetPlatform == TargetPlatform.android 
-        ? 'http://10.0.2.2:7071/api' 
-        : 'http://127.0.0.1:7071/api';
+     final String baseUrl = AppConfig.baseUrl;
 
      var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload_avatar'));
      request.fields['email'] = userEmail;
@@ -55,9 +54,7 @@ class UserService {
          final data = jsonDecode(response.body);
          // Construct full URL
          final String relativeUrl = data['url'];
-         final String fullUrl = defaultTargetPlatform == TargetPlatform.android
-            ? 'http://10.0.2.2:7071$relativeUrl'
-            : 'http://127.0.0.1:7071$relativeUrl';
+         final String fullUrl = '${AppConfig.baseUrlWithoutApi}$relativeUrl';
             
          profileImage.value = fullUrl;
          print("Profile Image Updated: $fullUrl");
@@ -77,9 +74,7 @@ class UserService {
     final String userEmail = email.value;
     if (userEmail.isEmpty) return; // Can't sync purely local or demo user without ID
 
-    final String baseUrl = defaultTargetPlatform == TargetPlatform.android 
-        ? 'http://10.0.2.2:7071/api' 
-        : 'http://127.0.0.1:7071/api'; 
+    final String baseUrl = AppConfig.baseUrl;
         
     try {
       await http.post(
