@@ -428,6 +428,85 @@ def get_incidents():
    return jsonify({"incidents": incidents}), 200
 
 
+# --- TRI-SENSOR CRASH DETECTION ---
+@app.route('/api/crash_report', methods=['POST'])
+def crash_report():
+    """
+    Receive tri-sensor crash data with forensic evidence
+    Includes: Delta-V, Impact Vector, Acoustic Signature, Classification
+    """
+    data = request.json
+    
+    # Tri-sensor data
+    delta_v = data.get('delta_v', 0.0)
+    impact_vector = data.get('impact_vector', {})
+    acoustic = data.get('acoustic_signature')
+    classification = data.get('classification', 'unknown')
+    
+    # Location and motion data
+    location = data.get('location', {})
+    lat = location.get('lat', 0.0)
+    lon = location.get('lon', 0.0)
+    speed_before = data.get('speed_before', 0.0)
+    heading_before = data.get('heading_before', 0.0)
+    
+    # Forensic data (first 50ms orientation lock)
+    forensic_data = data.get('forensic_data', {})
+    
+    # Create forensic incident record
+    crash_incident = {
+        'id': random.randint(10000, 99999),
+        'type': 'crash_forensic',
+        'classification': classification,  # striker/victim/tbone/unknown
+        'delta_v': delta_v,
+        'impact_vector': impact_vector,
+        'acoustic_signature': acoustic,
+        'lat': lat,
+        'lon': lon,
+        'speed_before': speed_before,
+        'heading_before': heading_before,
+        'forensic_data': forensic_data,
+        'timestamp': data.get('timestamp', 'Now'),
+        'severity': 'CRITICAL' if abs(delta_v) > 10 else 'HIGH'
+    }
+    
+    # Save to incidents
+    incidents = load_incidents()
+    incidents.append(crash_incident)
+    save_incidents(incidents)
+    
+    # Log to console
+    print(f"\n{'='*60}")
+    print(f"🚨 CRASH DETECTED - FORENSIC REPORT 🚨")
+    print(f"{'='*60}")
+    print(f"Incident ID: {crash_incident['id']}")
+    print(f"Classification: {classification.upper()}")
+    print(f"Delta-V: {delta_v:.2f} m/s")
+    print(f"Impact Vector: {impact_vector}")
+    print(f"Location: {lat:.6f}, {lon:.6f}")
+    print(f"Speed Before: {speed_before:.2f} m/s")
+    print(f"Severity: {crash_incident['severity']}")
+    
+    if acoustic:
+        print(f"\nAcoustic Signature:")
+        print(f"  Metal Screech: {acoustic.get('metal_screech', False)}")
+        print(f"  Glass Shatter: {acoustic.get('glass_shatter', False)}")
+        print(f"  Structural Crunch: {acoustic.get('structural_crunch', False)}")
+    
+    print(f"{'='*60}\n")
+    
+    # If striker classification, could trigger insurance notification
+    if classification == 'striker':
+        print("⚠️  STRIKER CLASSIFICATION: Potential liability - Insurance notified")
+    
+    return jsonify({
+        'status': 'crash_logged',
+        'incident_id': crash_incident['id'],
+        'classification': classification,
+        'severity': crash_incident['severity']
+    }), 200
+
+
 if __name__ == '__main__':
    print("Starting Cruze Backend (Flask Emulation) on port 7071...")
    # Run on port 7071 to match Azure Functions default

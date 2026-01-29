@@ -44,6 +44,8 @@ dependencies:
   flutter_dotenv: ^6.0.0
   image_picker: ^1.0.7
   http_parser: ^4.0.2
+  record: ^5.0.0  # Audio recording for acoustic fingerprinting
+  fft: ^2.0.0     # Fast Fourier Transform for frequency analysis
 
 dev_dependencies:
   flutter_test:

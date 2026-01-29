@@ -30,6 +30,8 @@
 	<string>This app needs access to location to show your position on the map.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>This app detects hard braking and crashes.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>This app uses audio to detect crash sounds for enhanced safety and forensic evidence.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

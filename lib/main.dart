@@ -14,6 +14,7 @@ import 'package:cruze_mobile/services/pothole_service.dart'; // Import PotholeSe
 import 'package:cruze_mobile/services/diagnostics_service.dart'; // Import DiagnosticsService
 import 'package:cruze_mobile/services/black_box_service.dart'; // Import BlackBoxService
 import 'package:cruze_mobile/services/rollover_service.dart'; // Import RolloverService
+import 'package:cruze_mobile/services/crash_detection_service.dart'; // Import CrashDetectionService
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,7 @@ Future<void> main() async {
   DiagnosticsService.instance.startMonitoring();
   BlackBoxService.instance.startRecording();
   RolloverService.instance.startMonitoring();
+  CrashDetectionService.instance.startMonitoring(); // Tri-Sensor Crash Detection
   
   runApp(const CruzeApp());
 }
