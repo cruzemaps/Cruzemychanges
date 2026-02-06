@@ -36,8 +36,8 @@ class _MapScreenState extends State<MapScreen> {
   // San Antonio coordinates
   static const LatLng _initialCenter = LatLng(29.4241, -98.4936);
   
-  // Hardcoded for Hackathon Speed - env var issues persisted
-  static const String azureKey = "REDACTED_AZURE_MAPS_KEY";
+  // Azure Maps key pulled from env at runtime.
+  static String get azureKey => dotenv.env['AZURE_MAPS_KEY'] ?? '';
 
   // State
   final MapController _mapController = MapController();

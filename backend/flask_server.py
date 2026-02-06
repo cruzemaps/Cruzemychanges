@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 load_dotenv() # Load .env file
 
 
-AZURE_MAPS_KEY = os.environ.get("AZURE_MAPS_KEY", "REDACTED_AZURE_MAPS_KEY")
+AZURE_MAPS_KEY = os.environ.get("AZURE_MAPS_KEY")
 HERE_HD_KEY = os.environ.get("HERE_HD_KEY")
 
 # Initialize Azure Maps Clients
@@ -46,7 +46,7 @@ search_client = MapsSearchClient(credential=maps_credential)
 
 
 # Cosmos DB Configuration
-COSMOS_CONNECTION_STRING = os.environ.get("COSMOS_CONNECTION_STRING") or "REDACTED_COSMOS_CONNECTION_STRING"
+COSMOS_CONNECTION_STRING = os.environ.get("COSMOS_CONNECTION_STRING")
 if COSMOS_CONNECTION_STRING:
    print("✅ COSMOS DB ENABLED: Connection String Found")
 else:
