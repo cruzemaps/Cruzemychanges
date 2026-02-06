@@ -65,7 +65,8 @@ class RouteManager:
             return filepath
         if os.path.exists(filepath):
             return filepath
-        backend_path = os.path.join(os.path.dirname(__file__), filepath)
+        backend_dir = os.path.dirname(os.path.dirname(__file__))
+        backend_path = os.path.join(backend_dir, filepath)
         if os.path.exists(backend_path):
             return backend_path
         return filepath

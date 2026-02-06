@@ -1,5 +1,5 @@
-from route_monitor import RouteManager, simulate_route_traversal
-from traffic_pipeline import TrafficAnalyzer, StreamManager
+from cameras.route_monitor import RouteManager, simulate_route_traversal
+from cameras.traffic_pipeline import TrafficAnalyzer, StreamManager
 import time
 import random
 

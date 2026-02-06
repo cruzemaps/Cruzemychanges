@@ -11,8 +11,8 @@ from azure.core.credentials import AzureKeyCredential
 from azure.maps.route import MapsRouteClient
 from azure.maps.search import MapsSearchClient
 # Route Monitor Imports
-from route_monitor import RouteManager
-from traffic_pipeline import TrafficAnalyzer, StreamManager
+from cameras.route_monitor import RouteManager
+from cameras.traffic_pipeline import TrafficAnalyzer, StreamManager
 from lane_matching import get_lane_geometry, match_lane
 
 
@@ -409,7 +409,7 @@ def get_incidents():
 
 @app.route('/api/cameras', methods=['GET'])
 def get_cameras():
-    from ai_monitor import CAMERAS
+    from cameras.ai_monitor import CAMERAS
     return jsonify({"cameras": CAMERAS}), 200
 
 
@@ -755,7 +755,7 @@ def api_signals():
 
 if __name__ == '__main__':
 
-   from ai_monitor import monitor_cameras
+   from cameras.ai_monitor import monitor_cameras
    import threading
    
    # Start AI Monitor in Background

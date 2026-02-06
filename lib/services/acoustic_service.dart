@@ -54,7 +54,7 @@ class AcousticService {
     
     try {
       // Apply FFT to get frequency spectrum
-      final spectrum = FFT().Transform(audioSamples);
+      final spectrum = FFT.Transform(audioSamples);
       
       // Calculate power spectrum
       final powerSpectrum = <double>[];
