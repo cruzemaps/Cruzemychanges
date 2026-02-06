@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TxDOT Private Camera Dashboard</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --accent-color: #38bdf8;
+            --text-color: #f8fafc;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .title h1 {
+            margin: 0;
+            font-size: 24px;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .jurisdiction-section {
+            margin-bottom: 50px;
+        }
+
+        .jurisdiction-header {
+            font-size: 20px;
+            margin-bottom: 20px;
+            padding-left: 10px;
+            border-left: 4px solid var(--accent-color);
+            color: var(--accent-color);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .camera-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+
+        .camera-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--accent-color);
+        }
+
+        .camera-feed {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .camera-feed img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .camera-info {
+            padding: 15px;
+        }
+
+        .camera-name {
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+
+        .camera-meta {
+            font-size: 12px;
+            opacity: 0.6;
+        }
+
+        .badge {
+            background: rgba(56, 189, 248, 0.2);
+            color: var(--accent-color);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <div class="title">
+            <h1>Cruze | Private Camera Dashboard</h1>
+            <p style="opacity: 0.7; font-size: 14px;">TxDOT Statewide Live Feeds</p>
+        </div>
+        <div>
+            <span class="badge">SECURED BY API KEY</span>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        {% for jurisdiction in jurisdictions %}
+        <div class="jurisdiction-section">
+            <h2 class="jurisdiction-header">{{ jurisdiction }}</h2>
+            <div class="camera-grid">
+                {% for cam in grouped_cameras[jurisdiction] %}
+                <div class="camera-card">
+                    <div class="camera-feed">
+                        <!-- Using the image endpoint from its.txdot.gov for the dashboard preview -->
+                        <img src="https://its.txdot.gov/ITS_Servers/CCTV/Image/{{ cam.id }}" alt="{{ cam.name }}"
+                            onerror="this.src='https://via.placeholder.com/300x169/000/fff?text=Camera+Offline'">
+                    </div>
+                    <div class="camera-info">
+                        <div class="camera-name">{{ cam.name }}</div>
+                        <div class="camera-meta">
+                            Route: {{ cam.route }} | Jurisdiction: {{ cam.jurisdiction }}
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <a href="{{ cam.httpsurl }}" target="_blank"
+                                style="color: var(--accent-color); text-decoration: none; font-size: 12px;">Open Live
+                                Stream
+                                ↗</a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+
+</html>

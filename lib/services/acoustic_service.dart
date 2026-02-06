@@ -54,13 +54,12 @@ class AcousticService {
     
     try {
       // Apply FFT to get frequency spectrum
-      final fft = FFT();
-      final spectrum = fft.Transform(audioSamples);
+      final spectrum = FFT().Transform(audioSamples);
       
       // Calculate power spectrum
       final powerSpectrum = <double>[];
       for (var complex in spectrum) {
-        final power = sqrt(complex.real * complex.real + complex.imag * complex.imag);
+        final power = sqrt(complex.real * complex.real + complex.imaginary * complex.imaginary);
         powerSpectrum.add(power);
       }
       

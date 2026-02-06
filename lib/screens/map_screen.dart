@@ -23,6 +23,7 @@ import 'package:cruze_mobile/services/ghost_lock_service.dart'; // Import GhostL
 import 'package:cruze_mobile/services/lane_service.dart'; // Import LaneService
 import 'package:cruze_mobile/services/black_box_service.dart'; // Import BlackBoxService
 import 'package:cruze_mobile/services/rollover_service.dart'; // Import RolloverService
+import 'package:cruze_mobile/services/positioning_service.dart'; // Lane-level positioning
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -48,6 +49,8 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<LatLng>? _ghostLockSubscription; // Ghost Lock
   StreamSubscription<Map<String, dynamic>>? _laneSubscription; // Lane Opt
   Map<String, dynamic>? _laneAdvice;
+  StreamSubscription<Map<String, dynamic>>? _laneMatchSubscription; // Lane Match
+  Map<String, dynamic>? _laneMatch;
   bool _ghostLockActive = false;
   bool _winterMode = false;
   bool _isTruck = false;
@@ -115,10 +118,15 @@ class _MapScreenState extends State<MapScreen> {
     _startListening();
     _startLocationUpdates();
     
-    // Start Polling Incidents every 5 seconds
+    // Start Polling Incidents and Cameras
     _fetchIncidents();
+    _fetchCameras();
     Timer.periodic(const Duration(seconds: 5), (timer) {
-      if (mounted) _fetchIncidents();
+      if (mounted) {
+        _fetchIncidents();
+        _fetchCameras();
+        _fetchTrafficStatus();
+      }
     });
     
     // Start Signal Glide Service
@@ -129,6 +137,20 @@ class _MapScreenState extends State<MapScreen> {
           _signalData = data;
         });
       }
+    });
+
+    _laneMatchSubscription = PositioningService.instance.laneStream.listen((data) {
+      if (mounted) {
+        setState(() {
+          _laneMatch = data;
+        });
+      }
+      final laneId = data['lane_id'] as String?;
+      final confidence = (data['confidence'] as num?)?.toDouble();
+      SignalGlideService.instance.updateLaneContext(
+        laneId: laneId,
+        confidence: confidence,
+      );
     });
 
     // Start Platooning Service
@@ -322,6 +344,9 @@ class _MapScreenState extends State<MapScreen> {
 
           });
           
+          // Lane-level matching (hybrid)
+          PositioningService.instance.updatePosition(position);
+
           // DYNAMIC CAMERA LOGIC
           if (_isFollowingUser) {
              // Zoom closer (17.5) for "Real Map" feel
@@ -362,8 +387,11 @@ class _MapScreenState extends State<MapScreen> {
   // double _accumulatedPenalty = 0.0;
   
   // Risk Alert State
-  bool _canShowRiskAlert = true;
+   bool _canShowRiskAlert = true;
   List<dynamic> _incidents = [];
+  List<dynamic> _cameras = []; // TxDOT Cameras
+  List<dynamic> _trafficSegments = []; // AI Traffic Layers
+  final Set<String> _notifiedIncidents = {}; // Track notified incident IDs
 
   // San Antonio High Risk Zones (Lat, Lng)
   final List<LatLng> _highRiskZones = [
@@ -553,6 +581,7 @@ class _MapScreenState extends State<MapScreen> {
               _routePoints = points;
               _currentInstruction = instruction;
             });
+            _checkForRouteIncidents(); // Start scanning for path alerts
             // Auto-start nav for demo
             _startDriveMode();
           }
@@ -772,12 +801,176 @@ class _MapScreenState extends State<MapScreen> {
            setState(() {
              _incidents = data['incidents'];
            });
+           _checkForRouteIncidents(); // Scan route whenever incidents update
         }
       }
     } catch (e) {
-    } catch (e) {
       debugPrint("Error fetching incidents: $e");
     }
+  }
+
+  Future<void> _fetchCameras() async {
+    try {
+      final host = await _getHost();
+      final response = await http.get(Uri.parse('http://$host:7071/api/cameras'));
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final host = await _getHost();
+        if (mounted) {
+           setState(() {
+             // Map cameras to use our proxy for image loading
+             _cameras = (data['cameras'] as List).map((c) {
+               return {
+                 ...c,
+                 'proxyUrl': 'http://$host:7071/api/camera_proxy/${c['id']}'
+               };
+             }).toList();
+           });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error fetching cameras: $e");
+    }
+  }
+
+  Future<void> _fetchTrafficStatus() async {
+    try {
+      final host = await _getHost();
+      final response = await http.get(Uri.parse('http://$host:7071/api/traffic_status'));
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+           setState(() {
+             _trafficSegments = data['traffic'];
+           });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error fetching traffic status: $e");
+    }
+  }
+
+  void _checkForRouteIncidents() {
+    if (_routePoints.isEmpty || _incidents.isEmpty) return;
+
+    for (var incident in _incidents) {
+      final String id = incident['id'].toString();
+      if (_notifiedIncidents.contains(id)) continue;
+
+      final incidentPos = LatLng(incident['lat'], incident['lon']);
+      const distance = Distance();
+
+      // Heuristic: Check every 50th point on route for efficiency, or if route is short, every point.
+      bool isOnRoute = false;
+      int step = _routePoints.length > 100 ? 50 : 5;
+      
+      for (int i = 0; i < _routePoints.length; i += step) {
+        if (distance.as(LengthUnit.Meter, _routePoints[i], incidentPos) < 1000) { // 1km radius
+          isOnRoute = true;
+          break;
+        }
+      }
+
+      if (isOnRoute) {
+        setState(() => _notifiedIncidents.add(id));
+        _showAiRouteAlert(incident);
+      }
+    }
+  }
+
+  void _showAiRouteAlert(dynamic incident) {
+    HapticFeedback.vibrate();
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: GlassCard(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.psychology, color: Colors.blueAccent, size: 48),
+              const SizedBox(height: 12),
+              Text("AI ROUTE ALERT", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 8),
+              Text(
+                incident['description'] ?? "Incident detected on your path.",
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      final camera = _cameras.firstWhere(
+                        (c) => (c['lat'] - incident['lat']).abs() < 0.005 && (c['lon'] - incident['lon']).abs() < 0.005,
+                        orElse: () => null,
+                      );
+                      if (camera != null) {
+                        _showCameraFeed(camera);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No camera stream available for this location.")));
+                      }
+                    },
+                    child: const Text("VIEW FEED", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      // In a real app, this would trigger an alternative route search
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Recalculating alternative route...")));
+                    },
+                    child: const Text("RE-ROUTE", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text("IGNORE", style: TextStyle(color: Colors.white24)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCameraFeed(dynamic camera) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: GlassCard(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(camera['name'], style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  camera['proxyUrl'] ?? camera['url'],
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return const Center(child: CircularProgressIndicator());
+                  },
+                  errorBuilder: (context, error, stackTrace) => const Center(child: Icon(Icons.videocam_off, color: Colors.white, size: 50)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text("Source: TxDOT TransGuide", style: GoogleFonts.montserrat(color: Colors.white54, fontSize: 12)),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CLOSE", style: TextStyle(color: Colors.orange))),
+            ],
+          ),
+        ),
+      ),
+    );
   }
   @override
   void dispose() {
@@ -792,6 +985,7 @@ class _MapScreenState extends State<MapScreen> {
     GhostLockService.instance.stopTracking();
     _laneSubscription?.cancel(); // Cancel Lane Opt
     LaneService.instance.stopPolling();
+    _laneMatchSubscription?.cancel(); // Cancel Lane Match
     _rolloverSubscription?.cancel();
     RolloverService.instance.stopMonitoring();
     super.dispose();
@@ -913,6 +1107,28 @@ class _MapScreenState extends State<MapScreen> {
                 )).toList(),
               ),
 
+              // AI TRAFFIC LAYER (Colored segments)
+              PolylineLayer(
+                polylines: _trafficSegments.map((seg) {
+                  final speed = seg['speed'] as int;
+                  Color trafficColor = Colors.green;
+                  if (speed < 30) trafficColor = Colors.red;
+                  else if (speed < 60) trafficColor = Colors.yellow;
+
+                  // Each segment is mocked as a short line around the camera for now
+                  // In production, this would be a real GPS segment
+                  final center = LatLng(seg['lat'], seg['lon']);
+                  return Polyline(
+                    points: [
+                      LatLng(center.latitude - 0.005, center.longitude - 0.005),
+                      LatLng(center.latitude + 0.005, center.longitude + 0.005),
+                    ],
+                    color: trafficColor.withOpacity(0.7),
+                    strokeWidth: 6.0,
+                  );
+                }).toList(),
+              ),
+
 
               PolylineLayer(
                 polylines: [
@@ -939,109 +1155,6 @@ class _MapScreenState extends State<MapScreen> {
                   ],
                 ],
               ),
-              
-              // SIGNAL GLIDE OVERLAY (Rights Side - Integrated below buttons)
-              if (_signalData != null)
-                Positioned(
-                  top: 350, 
-                  right: 16,
-                  child: SignalRing(
-                    recommendedSpeed: _signalData!['recommended_speed'] ?? 35,
-                    status: _signalData!['state'] ?? "GREEN",
-                    timeToGreen: (_signalData!['time_to_green'] ?? 0).toDouble(),
-                  ),
-                ),
-
-              // GHOST LOCK TOGGLE (Top Right)
-              Positioned(
-                top: 60,
-                right: 20,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FloatingActionButton.small(
-                      heroTag: "ghost_lock",
-                      backgroundColor: _ghostLockActive ? Colors.purpleAccent : Colors.grey[800],
-                      onPressed: _toggleGhostLock,
-                      child: const Icon(Icons.gps_off, color: Colors.white),
-                    ),
-                    const SizedBox(height: 10),
-                    FloatingActionButton.small(
-                      heroTag: "winter_mode",
-                      backgroundColor: _winterMode ? Colors.lightBlue : Colors.grey[800],
-                      onPressed: _toggleWinterMode,
-                      child: const Icon(Icons.ac_unit, color: Colors.white),
-                    ),
-                    const SizedBox(height: 10),
-                    FloatingActionButton.small(
-                      heroTag: "truck_mode",
-                      backgroundColor: _isTruck ? Colors.indigo : Colors.grey[800],
-                      onPressed: _toggleTruckMode,
-                      child: const Icon(Icons.local_shipping, color: Colors.white),
-                    ),
-                    const SizedBox(height: 10),
-                    FloatingActionButton.small(
-                      heroTag: "black_box",
-                      backgroundColor: Colors.black,
-                      onPressed: () {
-                         BlackBoxService.instance.triggerUpload();
-                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("📦 BLACK BOX UPLOADING..."), backgroundColor: Colors.black));
-                      },
-                      child: const Icon(Icons.sd_storage, color: Colors.white),
-                    ),
-                    const SizedBox(height: 10),
-                    // Recenter Button (Integrated)
-                    if (!_isFollowingUser)
-                      FloatingActionButton.small(
-                        heroTag: "recenter_fab",
-                        onPressed: () {
-                          setState(() {
-                            _isFollowingUser = true;
-                            _mapController.move(_currentPosition, 17.5);
-                          });
-                        },
-                        backgroundColor: const Color(0xFFff791a),
-                        child: const Icon(Icons.my_location, color: Colors.white),
-                      ),
-                  ],
-                ),
-              ),
-
-              // LANE GUIDANCE OVERLAY (Top Center)
-              if (_laneAdvice != null && _laneAdvice!['lane'] != 'CENTER')
-                Positioned(
-                  top: 100,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.blueAccent.withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [BoxShadow(color: Colors.blueAccent.withOpacity(0.5), blurRadius: 10)],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _laneAdvice!['lane'] == 'LEFT' ? Icons.arrow_back : Icons.arrow_forward,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            "MERGE ${_laneAdvice!['lane']} (${_laneAdvice!['reason']})",
-                            style: GoogleFonts.montserrat(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              
               MarkerLayer(
                 markers: [
                    // High Risk Zone Icons
@@ -1111,6 +1224,124 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ],
           ),
+
+          // SIGNAL GLIDE OVERLAY (Rights Side - Integrated below buttons)
+          if (_signalData != null)
+            Positioned(
+              top: 350, 
+              right: 16,
+              child: SignalRing(
+                recommendedSpeed: _signalData!['recommended_speed'] ?? 35,
+                status: _signalData!['state'] ?? "GREEN",
+                timeToGreen: (_signalData!['time_to_green'] ?? 0).toDouble(),
+              ),
+            ),
+          if (_laneMatch != null)
+            Positioned(
+              top: 480,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  "Lane: ${_laneMatch!['lane_id'] ?? 'UNKNOWN'} (${((_laneMatch!['confidence'] as num?) ?? 0).toStringAsFixed(2)})",
+                  style: GoogleFonts.montserrat(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ),
+
+          // GHOST LOCK TOGGLE (Top Right)
+          Positioned(
+            top: 60,
+            right: 20,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: "ghost_lock",
+                  backgroundColor: _ghostLockActive ? Colors.purpleAccent : Colors.grey[800],
+                  onPressed: _toggleGhostLock,
+                  child: const Icon(Icons.gps_off, color: Colors.white),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton.small(
+                  heroTag: "winter_mode",
+                  backgroundColor: _winterMode ? Colors.lightBlue : Colors.grey[800],
+                  onPressed: _toggleWinterMode,
+                  child: const Icon(Icons.ac_unit, color: Colors.white),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton.small(
+                  heroTag: "truck_mode",
+                  backgroundColor: _isTruck ? Colors.indigo : Colors.grey[800],
+                  onPressed: _toggleTruckMode,
+                  child: const Icon(Icons.local_shipping, color: Colors.white),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton.small(
+                  heroTag: "black_box",
+                  backgroundColor: Colors.black,
+                  onPressed: () {
+                     BlackBoxService.instance.triggerUpload();
+                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("📦 BLACK BOX UPLOADING..."), backgroundColor: Colors.black));
+                  },
+                  child: const Icon(Icons.sd_storage, color: Colors.white),
+                ),
+                const SizedBox(height: 10),
+                // Recenter Button (Integrated)
+                if (!_isFollowingUser)
+                  FloatingActionButton.small(
+                    heroTag: "recenter_fab",
+                    onPressed: () {
+                      setState(() {
+                        _isFollowingUser = true;
+                        _mapController.move(_currentPosition, 17.5);
+                      });
+                    },
+                    backgroundColor: const Color(0xFFff791a),
+                    child: const Icon(Icons.my_location, color: Colors.white),
+                  ),
+              ],
+            ),
+          ),
+
+          // LANE GUIDANCE OVERLAY (Top Center)
+          if (_laneAdvice != null && _laneAdvice!['lane'] != 'CENTER')
+            Positioned(
+              top: 100,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [BoxShadow(color: Colors.blueAccent.withOpacity(0.5), blurRadius: 10)],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _laneAdvice!['lane'] == 'LEFT' ? Icons.arrow_back : Icons.arrow_forward,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        "MERGE ${_laneAdvice!['lane']} (${_laneAdvice!['reason']})",
+                        style: GoogleFonts.montserrat(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           
            // Start Button (ValueListenable)
            ValueListenableBuilder<bool>(

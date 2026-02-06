@@ -18,6 +18,8 @@ class SignalGlideService {
 
   final StreamController<Map<String, dynamic>> _signalStreamController = StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get signalStream => _signalStreamController.stream;
+  String? _laneId;
+  double? _laneConfidence;
 
   void startPolling(LatLng currentPos) {
     stopPolling();
@@ -30,9 +32,17 @@ class SignalGlideService {
     _pollingTimer?.cancel();
   }
 
+  void updateLaneContext({String? laneId, double? confidence}) {
+    _laneId = laneId;
+    _laneConfidence = confidence;
+  }
+
   Future<void> _fetchSignalData(LatLng pos) async {
     try {
-      final response = await http.get(Uri.parse('$_baseUrl/api/signals?lat=${pos.latitude}&lon=${pos.longitude}'));
+      final laneParam = (_laneId != null && (_laneConfidence ?? 0) >= 0.6)
+          ? "&lane_id=$_laneId"
+          : "";
+      final response = await http.get(Uri.parse('$_baseUrl/api/signals?lat=${pos.latitude}&lon=${pos.longitude}$laneParam'));
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);

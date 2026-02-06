@@ -4,3 +4,12 @@ requests
 flask
 flask-cors
 python-dotenv
+opencv-python-headless
+numpy
+azure-maps-route
+azure-maps-search
+azure-identity
+ultralytics
+ultralytics
+shapely
+lapx
