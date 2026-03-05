@@ -10,10 +10,10 @@ class PositioningService {
   PositioningService._internal();
 
   final String _baseUrl = kIsWeb
-      ? "http://192.168.1.107:7071"
+      ? "https://unmaternal-parthenia-oarless.ngrok-free.app"
       : (defaultTargetPlatform == TargetPlatform.android
           ? "http://10.0.2.2:7071"
-          : "http://192.168.1.107:7071");
+          : "https://unmaternal-parthenia-oarless.ngrok-free.app");
 
   final StreamController<Map<String, dynamic>> _laneStreamController =
       StreamController<Map<String, dynamic>>.broadcast();

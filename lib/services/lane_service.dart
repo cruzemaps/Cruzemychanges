@@ -11,8 +11,8 @@ class LaneService {
 
   Timer? _pollingTimer;
   final String _baseUrl = kIsWeb 
-      ? "http://192.168.1.107:7071" 
-      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "http://192.168.1.107:7071");
+      ? "https://unmaternal-parthenia-oarless.ngrok-free.app" 
+      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "https://unmaternal-parthenia-oarless.ngrok-free.app");
 
   final StreamController<Map<String, dynamic>> _laneController = StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get laneStream => _laneController.stream;

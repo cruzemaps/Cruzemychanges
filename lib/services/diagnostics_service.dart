@@ -13,8 +13,8 @@ class DiagnosticsService {
 
   StreamSubscription<UserAccelerometerEvent>? _accelerometerSubscription;
   final String _baseUrl = kIsWeb 
-      ? "http://192.168.1.107:7071" 
-      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "http://192.168.1.107:7071");
+      ? "https://unmaternal-parthenia-oarless.ngrok-free.app" 
+      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "https://unmaternal-parthenia-oarless.ngrok-free.app");
 
   List<double> _jerkHistory = [];
   UserAccelerometerEvent? _lastEvent;
