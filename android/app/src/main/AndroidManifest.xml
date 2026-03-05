@@ -1,7 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
         android:label="Cruze"
         android:name="${applicationName}"
@@ -22,6 +26,12 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <meta-data
+                android:name="com.pravera.flutter_foreground_task.NotificationIcon"
+                android:value="@mipmap/ic_launcher" />
+            <meta-data
+                android:name="com.pravera.flutter_foreground_task.NotificationColor"
+                android:resource="@android:color/transparent" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -32,7 +42,10 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-    </application>
+        <service
+            android:name="com.pravera.flutter_foreground_task.models.ForegroundService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility?hl=en and
          https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.

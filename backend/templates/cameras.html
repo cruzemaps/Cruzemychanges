@@ -133,8 +133,8 @@
                 {% for cam in grouped_cameras[jurisdiction] %}
                 <div class="camera-card">
                     <div class="camera-feed">
-                        <!-- Using the image endpoint from its.txdot.gov for the dashboard preview -->
-                        <img src="https://its.txdot.gov/ITS_Servers/CCTV/Image/{{ cam.id }}" alt="{{ cam.name }}"
+                        <!-- Using the local proxy to apply Night Vision/Enhancement -->
+                        <img src="/api/camera_proxy/{{ cam.id }}" alt="{{ cam.name }}"
                             onerror="this.src='https://via.placeholder.com/300x169/000/fff?text=Camera+Offline'">
                     </div>
                     <div class="camera-info">

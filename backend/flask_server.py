@@ -2,7 +2,16 @@ import json
 import os
 import random
 import logging
-from flask import Flask, request, jsonify, send_from_directory, render_template
+import cv2
+import numpy as np
+import requests
+import time
+import os
+import json
+import threading
+import queue
+from datetime import datetime
+from flask import Flask, jsonify, request, render_template, Response, send_from_directory, render_template
 from flask_cors import CORS
 from api_key_check import require_txdot_key
 from werkzeug.utils import secure_filename
@@ -85,7 +94,8 @@ def get_container():
 
 # Persistence
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE_DIR, "users.json")
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+DB_FILE = os.path.join(BASE_DIR, "data", "users.json")
 
 
 def load_users():
@@ -329,7 +339,7 @@ def get_speed_limit_endpoint():
 
 
 # --- INCIDENT REPORTING ---
-INCIDENTS_FILE = "incidents.json"
+INCIDENTS_FILE = os.path.join(PROJECT_ROOT, "data", "mock_json", "incidents.json")
 
 
 def load_incidents():
@@ -415,17 +425,101 @@ def get_cameras():
 
 @app.route('/api/camera_proxy/<camera_id>', methods=['GET'])
 def camera_proxy(camera_id):
-    url = f"https://its.txdot.gov/ITS_Servers/CCTV/Image/{camera_id}"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
-    try:
-        response = requests.get(url, timeout=5, headers=headers)
-        if response.status_code == 200:
-            return response.content, 200, {'Content-Type': 'image/jpeg'}
-        return f"Camera {camera_id} not available (Status: {response.status_code})", 404
-    except Exception as e:
-        return str(e), 500
+    # 1. Try to get HLS URL from Route Manager
+    stream_url = None
+    if ROUTE_MANAGER:
+        # Find camera
+        cam = next((c for c in ROUTE_MANAGER.all_cameras if str(c.get('id')) == str(camera_id)), None)
+        if cam:
+            stream_url = cam.get('httpsurl')
+
+    img = None
+    
+    # 2. Try HLS Capture if available (with Timeout)
+    if stream_url and stream_url.endswith('.m3u8'):
+        import threading
+        import queue
+        
+        def capture_stream(url, result_queue):
+            try:
+                cap = cv2.VideoCapture(url)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        result_queue.put(frame)
+                cap.release()
+            except Exception as e:
+                print(f"Stream thread error: {e}")
+
+        # Use a queue to get the result from the thread
+        q = queue.Queue()
+        t = threading.Thread(target=capture_stream, args=(stream_url, q))
+        t.daemon = True
+        t.start()
+        try:
+            # Wait for 3 seconds max
+            img = q.get(timeout=3.0)
+        except queue.Empty:
+            print(f"HLS Stream Timeout for {camera_id} (>3s)")
+            # Thread will eventually exit or eventually hang in background, but we move on.
+            img = None
+        except Exception as e:
+            print(f"HLS Capture error for {camera_id}: {e}")
+            img = None
+
+    # 3. Fallback to Snapshot API if HLS failed
+    if img is None:
+        url = f"https://its.txdot.gov/ITS_Servers/CCTV/Image/{camera_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        try:
+            response = requests.get(url, timeout=5, headers=headers)
+            if response.status_code == 200:
+                # Decode image
+                nparr = np.frombuffer(response.content, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        except Exception as e:
+            print(f"Snapshot fetch failed: {e}")
+
+    # 4. Process and Return
+    if img is not None:
+        # Helper to check if camera is a highway camera
+        def is_highway(cam_data):
+            if not cam_data: return False
+            route = str(cam_data.get('route') or '').upper()
+            # Highways: IH (Interstate), US (US Hwy), SH (State Hwy), SL (State Loop), LP (Loop), TOLL
+            return route.startswith(('IH', 'US', 'SH', 'SL', 'LP', 'TOLL'))
+
+        # Retrieve camera data
+        camera_data = None
+        if ROUTE_MANAGER:
+             camera_data = next((c for c in ROUTE_MANAGER.all_cameras if str(c.get('id')) == str(camera_id)), None)
+
+        # Apply Enhancement & Traffic Analysis if Traffic Analyzer is available
+        if TRAFFIC_ANALYZER:
+            try:
+                # ONLY apply Traffic Analysis (Green Boxes + Speed) for Highway Cameras
+                if is_highway(camera_data):
+                    # Returns: annotated_frame, anomalies, analysis_data
+                    img, _, _ = TRAFFIC_ANALYZER.process_frame(img)
+                else:
+                    # Optional: Still apply Night Enhancement for non-highways? 
+                    # User said "filter out highway cameras and see what you can do", implying feature is for highways.
+                    # But night enhancement is useful everywhere. Let's keep night enhancement for all?
+                    # "I want it for highway camera's only" -> referring to the traffic density/speed feature.
+                    # TrafficAnalyzer.process_frame does BOTH enhancement and analysis.
+                    # I should break it down or just call _enhance_night_frame for non-highways.
+                    img = TRAFFIC_ANALYZER._enhance_night_frame(img)
+            except Exception as e:
+                print(f"Analysis failed: {e}")
+        
+        # Encode back to JPEG
+        _, img_encoded = cv2.imencode('.jpg', img)
+        return img_encoded.tobytes(), 200, {'Content-Type': 'image/jpeg'}
+
+    return jsonify({"error": "Camera unavailable"}), 404
+
 
 # --- TRAFFIC STATUS STORAGE ---
 TRAFFIC_STATUS = []
@@ -442,6 +536,34 @@ def traffic_update():
 @app.route('/api/traffic_status', methods=['GET'])
 def get_traffic_status():
     return jsonify({"traffic": TRAFFIC_STATUS}), 200
+
+# --- TIM ALERTS (PHASE 4) ---
+TIM_ALERTS = {}
+
+@app.route('/api/internal/tim_dispatch', methods=['POST'])
+def tim_dispatch():
+    data = request.json
+    target_id = data.get('target_id')
+    tim = data.get('tim')
+    if target_id and tim:
+        # Store alert for 30 seconds
+        TIM_ALERTS[target_id] = {
+            "tim": tim,
+            "expires": time.time() + 30.0
+        }
+    return jsonify({"status": "received"}), 200
+
+@app.route('/api/tim_alerts/<target_id>', methods=['GET'])
+def get_tim_alerts(target_id):
+    now = time.time()
+    # Cleanup expired
+    expired = [k for k, v in TIM_ALERTS.items() if v["expires"] < now]
+    for k in expired: del TIM_ALERTS[k]
+    
+    alert = TIM_ALERTS.get(target_id)
+    if alert:
+        return jsonify({"alert": alert["tim"]}), 200
+    return jsonify({"alert": None}), 200
 
 # --- TRI-SENSOR CRASH DETECTION ---
 @app.route('/api/crash_report', methods=['POST'])
@@ -527,7 +649,7 @@ def crash_report():
 @require_txdot_key
 def get_txdot_cameras_api():
     """Secured API for the App to get camera metadata."""
-    path = 'backend/cameras_full.json' if os.path.exists('backend/cameras_full.json') else 'cameras_full.json'
+    path = os.path.join(BASE_DIR, "data", "cameras_full.json")
     try:
         with open(path, 'r') as f:
             data = json.load(f)
@@ -539,7 +661,7 @@ def get_txdot_cameras_api():
 @require_txdot_key
 def camera_dashboard():
     """Secured dashboard for viewing live camera feeds grouped by jurisdiction."""
-    path = 'backend/cameras_full.json' if os.path.exists('backend/cameras_full.json') else 'cameras_full.json'
+    path = os.path.join(BASE_DIR, "data", "cameras_full.json")
     try:
         with open(path, 'r') as f:
             cameras = json.load(f).get('cameras', [])
@@ -756,11 +878,15 @@ def api_signals():
 if __name__ == '__main__':
 
    from cameras.ai_monitor import monitor_cameras
+   from mqtt.telemetry_receiver import start_mqtt_receiver
    import threading
    
-   # Start AI Monitor in Background
+   # Start AI Monitor in Background (Optional)
    monitor_thread = threading.Thread(target=monitor_cameras, daemon=True)
-   # monitor_thread.start() # Disabled to stability testing
+   # monitor_thread.start() # Disabled for stability testing
+   
+   # Start MQTT Receiver for 5Hz Telemetry
+   start_mqtt_receiver()
 
    
    print("Starting Cruze Backend (Flask Emulation) on port 7071...")

@@ -7,14 +7,24 @@ import threading
 import json
 from ultralytics import YOLO
 import os
+from .tracking.fusion import FusionEngine
+from ..mqtt.telemetry_receiver import get_active_trucks
+from ..routing.j2735_translator import generate_bsm, process_phantom_jam_logic, send_tim_alert_to_app
 
 # Load a lightweight YOLOv8 model
 # It will download the model on first run
-model = YOLO('yolov8n.pt')
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+model_path = os.path.join(PROJECT_ROOT, 'models', 'yolov8n.pt')
+model = YOLO(model_path)
+
+# Initialize the Sensor Fusion Engine
+fusion_engine = FusionEngine()
 
 # Load Statewide Cameras
 try:
-    with open('backend/cameras_full.json', 'r') as f:
+    cameras_path = os.path.join(BASE_DIR, 'data', 'cameras_full.json')
+    with open(cameras_path, 'r') as f:
         CAMERAS = json.load(f)['cameras']
     print(f"✅ Loaded {len(CAMERAS)} cameras from cameras_full.json")
 except Exception as e:
@@ -76,6 +86,40 @@ def analyze_with_ai(image):
     base_speed = max(5, 75 - (density * 70))
     speed = int(base_speed + random.randint(-3, 3))
     
+    # +++ PHASE 3 SENSOR FUSION INTEGRATION +++
+    # Get high-frequency V-OBU GPS points
+    active_trucks = get_active_trucks()
+    # Format bboxes for SORT + Fusion [x1,y1,x2,y2,confidence,classId]
+    fusion_boxes = [np.array([b.xyxy[0][0].item(), b.xyxy[0][1].item(), b.xyxy[0][2].item(), b.xyxy[0][3].item(), b.conf[0].item(), b.cls[0].item()]) for b in detected_vehicles]
+    
+    fusion_state = fusion_engine.process_frame(fusion_boxes, active_trucks)
+    if fusion_state.get('locked'):
+        truck_id = fusion_engine.locked_truck_id
+        # Use mock location for now representing the center of the camera
+        lat, lon = 29.4267, -98.4375 
+        
+        print(f"🎯 FUSION LOCKED: Cruze ID {truck_id} -> $v_{{ego}}$={fusion_state['v_ego']:.1f}m/s | $h_{{gap}}$={fusion_state['gap_meters']:.1f}m | $v_{{lead}}$={fusion_state['v_lead']:.1f}m/s")
+        
+        # +++ PHASE 4 ROUTING ARCHITECTURE +++
+        # 1. Generate BSM
+        bsm_packet = generate_bsm(
+            ego_id=truck_id,
+            lat=lat, 
+            lon=lon, 
+            heading=0.0, 
+            speed_mps=fusion_state['v_ego'], 
+            lead_speed_mps=fusion_state['v_lead'], 
+            gap_meters=fusion_state['gap_meters']
+        )
+        
+        # 2. Process via Mock DOT iNET Logic
+        tim_alert = process_phantom_jam_logic(bsm_packet)
+        if tim_alert:
+            # 3. Route Alert Back To App
+            send_tim_alert_to_app(truck_id, tim_alert)
+            
+    # ----------------------------------------
+    
     incident_type = None
     description = None
     
@@ -95,7 +139,8 @@ def analyze_with_ai(image):
         "density": density,
         "speed": speed,
         "incident": incident_type,
-        "description": description
+        "description": description,
+        "fusion_state": fusion_state
     }
 
 def analyze_camera_batch(cameras):

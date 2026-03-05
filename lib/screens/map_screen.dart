@@ -10,6 +10,9 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+import '../services/microphone_service.dart';
+import '../services/telemetry_service.dart'; // Appended to retrieve clientId
+
 // import 'dart:io' show Platform; // REMOVED for Web Compatibility
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
@@ -35,7 +38,7 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   // San Antonio coordinates
   static const LatLng _initialCenter = LatLng(29.4241, -98.4936);
-  
+
   // Azure Maps key pulled from env at runtime.
   static String get azureKey => dotenv.env['AZURE_MAPS_KEY'] ?? '';
 
@@ -49,12 +52,13 @@ class _MapScreenState extends State<MapScreen> {
   StreamSubscription<LatLng>? _ghostLockSubscription; // Ghost Lock
   StreamSubscription<Map<String, dynamic>>? _laneSubscription; // Lane Opt
   Map<String, dynamic>? _laneAdvice;
-  StreamSubscription<Map<String, dynamic>>? _laneMatchSubscription; // Lane Match
+  StreamSubscription<Map<String, dynamic>>?
+      _laneMatchSubscription; // Lane Match
   Map<String, dynamic>? _laneMatch;
   bool _ghostLockActive = false;
   bool _winterMode = false;
   bool _isTruck = false;
-  
+
   StreamSubscription<bool>? _rolloverSubscription; // Rollover Alert
   bool _rolloverRisk = false;
 
@@ -64,74 +68,66 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _destination;
   String? _routeDistance;
   List<LatLng> _routePoints = [];
-  
+
   void _toggleGhostLock() {
     setState(() {
-       _ghostLockActive = !_ghostLockActive;
+      _ghostLockActive = !_ghostLockActive;
     });
-    
+
     if (_ghostLockActive) {
       GhostLockService.instance.startTracking(_currentPosition);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("👻 GHOST LOCK ENGAGED: GPS DENIED"), backgroundColor: Colors.purpleAccent));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("👻 GHOST LOCK ENGAGED: GPS DENIED"),
+          backgroundColor: Colors.purpleAccent));
     } else {
       GhostLockService.instance.stopTracking();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("GPS RESTORED"), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("GPS RESTORED"), backgroundColor: Colors.green));
     }
   }
 
   void _toggleWinterMode() {
     setState(() {
-       _winterMode = !_winterMode;
+      _winterMode = !_winterMode;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_winterMode ? "❄️ WINTER MODE ON: Avoiding Icy Roads" : "☀️ WINTER MODE OFF"),
-        backgroundColor: _winterMode ? Colors.lightBlue : Colors.orange,
-      )
-    );
-     // Re-fetch route if destination exists
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(_winterMode
+          ? "❄️ WINTER MODE ON: Avoiding Icy Roads"
+          : "☀️ WINTER MODE OFF"),
+      backgroundColor: _winterMode ? Colors.lightBlue : Colors.orange,
+    ));
+    // Re-fetch route if destination exists
     if (_destination != null) {
-       _fetchRealRoute(_currentPosition, _destination!);
+      _fetchRealRoute(_currentPosition, _destination!);
     }
   }
 
   void _toggleTruckMode() {
     setState(() {
-       _isTruck = !_isTruck;
+      _isTruck = !_isTruck;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_isTruck ? "🚛 TRUCK MODE ON: Height Restricted Routing" : "🚗 TRUCK MODE OFF"),
-        backgroundColor: _isTruck ? Colors.indigo : Colors.blueGrey,
-      )
-    );
-     // Re-fetch route if destination exists
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(_isTruck
+          ? "🚛 TRUCK MODE ON: Height Restricted Routing"
+          : "🚗 TRUCK MODE OFF"),
+      backgroundColor: _isTruck ? Colors.indigo : Colors.blueGrey,
+    ));
+    // Re-fetch route if destination exists
     if (_destination != null) {
-       _fetchRealRoute(_currentPosition, _destination!);
+      _fetchRealRoute(_currentPosition, _destination!);
     }
   }
 
   @override
   void initState() {
     super.initState();
-
-    _startListening();
     _startLocationUpdates();
-    
-    // Start Polling Incidents and Cameras
-    _fetchIncidents();
-    _fetchCameras();
-    Timer.periodic(const Duration(seconds: 5), (timer) {
-      if (mounted) {
-        _fetchIncidents();
-        _fetchCameras();
-        _fetchTrafficStatus();
-      }
-    });
-    
+    _setupTrafficPolling(); // Check TIM Alerts within here
+
     // Start Signal Glide Service
     SignalGlideService.instance.startPolling(_initialCenter);
-    _signalSubscription = SignalGlideService.instance.signalStream.listen((data) {
+    _signalSubscription =
+        SignalGlideService.instance.signalStream.listen((data) {
       if (mounted) {
         setState(() {
           _signalData = data;
@@ -139,7 +135,8 @@ class _MapScreenState extends State<MapScreen> {
       }
     });
 
-    _laneMatchSubscription = PositioningService.instance.laneStream.listen((data) {
+    _laneMatchSubscription =
+        PositioningService.instance.laneStream.listen((data) {
       if (mounted) {
         setState(() {
           _laneMatch = data;
@@ -155,68 +152,91 @@ class _MapScreenState extends State<MapScreen> {
 
     // Start Platooning Service
     PlatooningService.instance.start();
-    _platoonSubscription = PlatooningService.instance.messagesStream.listen((messages) {
+    _platoonSubscription =
+        PlatooningService.instance.messagesStream.listen((messages) {
       if (mounted) {
         for (var msg in messages) {
           // BLUE WAVE: AMBULANCE ALERT
           if (msg['type'] == 'AMBULANCE') {
-             // Show Full Screen Alert
-             showDialog(
-               context: context, 
-               barrierDismissible: false,
-               builder: (context) => Dialog(
-                 backgroundColor: Colors.transparent,
-                 child: Container(
-                   padding: const EdgeInsets.all(20),
-                   decoration: BoxDecoration(
-                     color: Colors.blueAccent.withOpacity(0.9),
-                     borderRadius: BorderRadius.circular(20),
-                     boxShadow: const [BoxShadow(color: Colors.blue, blurRadius: 30, spreadRadius: 10)],
-                   ),
-                   child: Column(
-                     mainAxisSize: MainAxisSize.min,
-                     children: [
-                       const Icon(Icons.emergency, color: Colors.white, size: 60),
-                       const SizedBox(height: 20),
-                       Text("THE BLUE WAVE", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                       const SizedBox(height: 10),
-                       Text("Ambulance Approaching", style: GoogleFonts.montserrat(color: Colors.white70, fontSize: 16)),
-                       Text("PULL OVER TO RIGHT", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-                       const SizedBox(height: 20),
-                       ElevatedButton(
-                         onPressed: () => Navigator.pop(context),
-                         style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.blueAccent),
-                         child: const Text("I HAVE PULLED OVER"),
-                       )
-                     ],
-                   ),
-                 ),
-               )
-             );
+            // Show Full Screen Alert
+            showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => Dialog(
+                      backgroundColor: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.blueAccent.withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: const [
+                            BoxShadow(
+                                color: Colors.blue,
+                                blurRadius: 30,
+                                spreadRadius: 10)
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.emergency,
+                                color: Colors.white, size: 60),
+                            const SizedBox(height: 20),
+                            Text("THE BLUE WAVE",
+                                style: GoogleFonts.montserrat(
+                                    color: Colors.white,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 10),
+                            Text("Ambulance Approaching",
+                                style: GoogleFonts.montserrat(
+                                    color: Colors.white70, fontSize: 16)),
+                            Text("PULL OVER TO RIGHT",
+                                style: GoogleFonts.montserrat(
+                                    color: Colors.white,
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 20),
+                            ElevatedButton(
+                              onPressed: () => Navigator.pop(context),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.white,
+                                  foregroundColor: Colors.blueAccent),
+                              child: const Text("I HAVE PULLED OVER"),
+                            )
+                          ],
+                        ),
+                      ),
+                    ));
           }
-          
+
           // Show Alert for High Priority Messages
-          if (msg['type'] == 'BRAKING' || msg['type'] == 'CRASH' || msg['type'] == 'POTHOLE') {
-             ScaffoldMessenger.of(context).showSnackBar(
-               SnackBar(
-                 content: Row(
-                   children: [
-                     const Icon(Icons.warning_amber_rounded, color: Colors.white),
-                     const SizedBox(width: 10),
-                     Text("${msg['sender']}: ${msg['content']}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                   ],
-                 ),
-                 backgroundColor: Colors.redAccent,
-                 duration: const Duration(seconds: 3),
-               ),
-             );
+          if (msg['type'] == 'BRAKING' ||
+              msg['type'] == 'CRASH' ||
+              msg['type'] == 'POTHOLE') {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        color: Colors.white),
+                    const SizedBox(width: 10),
+                    Text("${msg['sender']}: ${msg['content']}",
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                backgroundColor: Colors.redAccent,
+                duration: const Duration(seconds: 3),
+              ),
+            );
           }
         }
       }
     });
 
     // Ghost Lock Listener
-    _ghostLockSubscription = GhostLockService.instance.positionStream.listen((pos) {
+    _ghostLockSubscription =
+        GhostLockService.instance.positionStream.listen((pos) {
       if (_ghostLockActive && mounted) {
         setState(() {
           _currentPosition = pos;
@@ -228,18 +248,18 @@ class _MapScreenState extends State<MapScreen> {
     // Lane Optimization Service
     LaneService.instance.startPolling(_initialCenter);
     _laneSubscription = LaneService.instance.laneStream.listen((data) {
-       if (mounted) setState(() => _laneAdvice = data);
+      if (mounted) setState(() => _laneAdvice = data);
     });
 
     // Rollover Service
     RolloverService.instance.startMonitoring();
     _rolloverSubscription = RolloverService.instance.alertStream.listen((risk) {
-       if (mounted) {
-          if (risk != _rolloverRisk) {
-            if (risk) HapticFeedback.heavyImpact();
-            setState(() => _rolloverRisk = risk);
-          }
-       }
+      if (mounted) {
+        if (risk != _rolloverRisk) {
+          if (risk) HapticFeedback.heavyImpact();
+          setState(() => _rolloverRisk = risk);
+        }
+      }
     });
   }
 
@@ -262,28 +282,30 @@ class _MapScreenState extends State<MapScreen> {
         return;
       }
     }
-    
+
     if (permission == LocationPermission.deniedForever) {
       return;
     }
 
     const LocationSettings locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation, 
-      distanceFilter: 0, // Set to 0 to see EVERY modification (even noise) for "lively" feel on simulator
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter:
+          0, // Set to 0 to see EVERY modification (even noise) for "lively" feel on simulator
     );
-    
+
     // 1. Get Immediate Fix (Live Location)
     try {
       debugPrint("Getting initial location fix...");
-      Position current = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      Position current = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
       debugPrint("Initial location: ${current.latitude}, ${current.longitude}");
       if (mounted) {
-         setState(() {
-           _currentPosition = LatLng(current.latitude, current.longitude);
-           // Don't accumulate distance for this "jump"
-         });
-         // Snap Camera Immediately
-         _mapController.move(_currentPosition, 17.5);
+        setState(() {
+          _currentPosition = LatLng(current.latitude, current.longitude);
+          // Don't accumulate distance for this "jump"
+        });
+        // Snap Camera Immediately
+        _mapController.move(_currentPosition, 17.5);
       }
     } catch (e) {
       debugPrint("Error getting immediate location: $e");
@@ -291,76 +313,88 @@ class _MapScreenState extends State<MapScreen> {
 
     // 2. Start Streaming Updates
     debugPrint("Starting location stream...");
-    _positionStreamSubscription = Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+    _positionStreamSubscription =
+        Geolocator.getPositionStream(locationSettings: locationSettings).listen(
       (Position position) {
-        debugPrint("Location update received: ${position.latitude}, ${position.longitude} Speed: ${position.speed}");
+        debugPrint(
+            "Location update received: ${position.latitude}, ${position.longitude} Speed: ${position.speed}");
         final newLatLng = LatLng(position.latitude, position.longitude);
         final speedMph = (position.speed * 2.23694); // Convert m/s to mph
-        
+
         if (mounted) {
           setState(() {
             // Track Distance
             const distance = Distance();
             // Calculate distance from last position in miles (1 meter = 0.000621371 miles)
-            final moves = distance.as(LengthUnit.Meter, _currentPosition, newLatLng) * 0.000621371;
-            if (moves > 0.001) { // Filter noise
-                SafetyService.instance.updateDistance(moves);
+            final moves =
+                distance.as(LengthUnit.Meter, _currentPosition, newLatLng) *
+                    0.000621371;
+            if (moves > 0.001) {
+              // Filter noise
+              SafetyService.instance.updateDistance(moves);
             }
 
             _currentPosition = newLatLng;
             _currentSpeed = speedMph;
-            
+
             // Safety Score Logic: Speeding
             if (_speedLimit != null && _currentSpeed > (_speedLimit! + 5)) {
-               // Speeding Penalty: +0.5 per tick (approx 1 sec)
-               // Only record if we haven't flooded the events - logic handled by service or simple throttle?
-               // For now, just update the score silently or with a "Speeding" event?
-               // Let's add a silent penalty to the service implementation if we wanted, 
-               // but for now let's just trigger a "Speeding" event occasionally or just add penalty.
-               // For this refactor, we'll just add the penalty directly via a helper or direct, 
-               // but recordEvent is better. Let's make it a small penalty.
-               // Actually, let's throttle this so we don't look like we are spamming.
-               // Simplified: Just add penalty logic to service if we want, or call recordEvent.
-               SafetyService.instance.recordEvent("Speeding", "Over limit by ${_currentSpeed.toInt() - _speedLimit!} mph", 0.5);
+              // Speeding Penalty: +0.5 per tick (approx 1 sec)
+              // Only record if we haven't flooded the events - logic handled by service or simple throttle?
+              // For now, just update the score silently or with a "Speeding" event?
+              // Let's add a silent penalty to the service implementation if we wanted,
+              // but for now let's just trigger a "Speeding" event occasionally or just add penalty.
+              // For this refactor, we'll just add the penalty directly via a helper or direct,
+              // but recordEvent is better. Let's make it a small penalty.
+              // Actually, let's throttle this so we don't look like we are spamming.
+              // Simplified: Just add penalty logic to service if we want, or call recordEvent.
+              SafetyService.instance.recordEvent(
+                  "Speeding",
+                  "Over limit by ${_currentSpeed.toInt() - _speedLimit!} mph",
+                  0.5);
             }
 
             // High Risk Zone Alert Logic
-             if (_destination != null) {
-               _updateNavigation(newLatLng, speedMph);
-               _fetchSpeedLimit(newLatLng);
-             }
-
-             for (final zone in _highRiskZones) {
-               const Distance distance = Distance();
-               final double meterDist = distance.as(LengthUnit.Meter, newLatLng, zone);
-               if (meterDist < 500) {
-                  if (_canShowRiskAlert) {
-                     _showRiskAlert();
-                     _canShowRiskAlert = false;
-                     Timer(const Duration(minutes: 5), () => _canShowRiskAlert = true);
-                  }
-               }
+            if (_destination != null) {
+              _updateNavigation(newLatLng, speedMph);
+              _fetchSpeedLimit(newLatLng);
             }
 
+            // Check for nearby highway cameras (0.2 miles = ~322 meters)
+            _checkForNearbyCameras(newLatLng);
+
+            for (final zone in _highRiskZones) {
+              const Distance distance = Distance();
+              final double meterDist =
+                  distance.as(LengthUnit.Meter, newLatLng, zone);
+              if (meterDist < 500) {
+                if (_canShowRiskAlert) {
+                  _showRiskAlert();
+                  _canShowRiskAlert = false;
+                  Timer(const Duration(minutes: 5),
+                      () => _canShowRiskAlert = true);
+                }
+              }
+            }
           });
-          
+
           // Lane-level matching (hybrid)
           PositioningService.instance.updatePosition(position);
 
           // DYNAMIC CAMERA LOGIC
           if (_isFollowingUser) {
-             // Zoom closer (17.5) for "Real Map" feel
-             // Rotate map to match heading (GPS bearing) if moving
-             double targetZoom = 17.5;
-             double targetRotation = _mapController.camera.rotation;
-             
-             if (speedMph > 2) {
-               // Only rotate if we are actually moving to avoid jitter
-               targetRotation = position.heading;
-             }
-             
-             _mapController.move(newLatLng, targetZoom);
-             _mapController.rotate(targetRotation);
+            // Zoom closer (17.5) for "Real Map" feel
+            // Rotate map to match heading (GPS bearing) if moving
+            double targetZoom = 17.5;
+            double targetRotation = _mapController.camera.rotation;
+
+            if (speedMph > 2) {
+              // Only rotate if we are actually moving to avoid jitter
+              targetRotation = position.heading;
+            }
+
+            _mapController.move(newLatLng, targetZoom);
+            _mapController.rotate(targetRotation);
           }
         }
       },
@@ -375,19 +409,19 @@ class _MapScreenState extends State<MapScreen> {
   List<dynamic> _searchResults = [];
   bool _isSearching = false;
   Timer? _debounce;
-  
+
   // Navigation State
   String? _currentInstruction;
   int? _speedLimit; // Real Speed Limit (nullable)
   double _currentSpeed = 0.0;
-  
+
   // Safety Score - MOVED TO SERVICE
   // double _safetyScore = 100.0;
   // double _totalDistanceMiles = 0.0;
   // double _accumulatedPenalty = 0.0;
-  
+
   // Risk Alert State
-   bool _canShowRiskAlert = true;
+  bool _canShowRiskAlert = true;
   List<dynamic> _incidents = [];
   List<dynamic> _cameras = []; // TxDOT Cameras
   List<dynamic> _trafficSegments = []; // AI Traffic Layers
@@ -404,34 +438,77 @@ class _MapScreenState extends State<MapScreen> {
     const LatLng(29.4911, -98.7030), // Loop 1604 & Culebra Road
   ];
 
+  // Camera Alert State
+  bool _showCameraAlert = false;
+  String _approachingCameraName = "";
+  DateTime? _lastCameraAlertTime;
+
   void _showRiskAlert() {
-     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Row(
-            children: [
-               Icon(Icons.warning_amber_rounded, color: Colors.white),
-               SizedBox(width: 10),
-               Expanded(
-                 child: Column(
-                   mainAxisSize: MainAxisSize.min,
-                   crossAxisAlignment: CrossAxisAlignment.start,
-                   children: [
-                     Text("ENTERING HIGH RISK ZONE", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
-                     Text("Do not stop. Keep doors locked.", style: TextStyle(fontSize: 12)),
-                   ],
-                 ),
-               ),
-            ],
-          ),
-          backgroundColor: Colors.black,
-          duration: const Duration(seconds: 5),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-             side: const BorderSide(color: Colors.red, width: 2),
-             borderRadius: BorderRadius.circular(8),
-          ),
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.white),
+            SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("ENTERING HIGH RISK ZONE",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.redAccent)),
+                  Text("Do not stop. Keep doors locked.",
+                      style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            ),
+          ],
         ),
-     );
+        backgroundColor: Colors.black,
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          side: const BorderSide(color: Colors.red, width: 2),
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
+  }
+
+  void _checkForNearbyCameras(LatLng pos) {
+    if (_cameras.isEmpty) return;
+    // Don't spam alerts - cooldown 2 minutes
+    if (_lastCameraAlertTime != null &&
+        DateTime.now().difference(_lastCameraAlertTime!) <
+            const Duration(minutes: 2)) {
+      return;
+    }
+
+    const Distance distance = Distance();
+    for (var cam in _cameras) {
+      final camPos = LatLng(cam['lat'], cam['lon']);
+      final double meters = distance.as(LengthUnit.Meter, pos, camPos);
+
+      if (meters < 322) {
+        // 0.2 miles
+        // Trigger Alert
+        if (mounted) {
+          HapticFeedback.mediumImpact();
+          setState(() {
+            _showCameraAlert = true;
+            _approachingCameraName = cam['name'] ?? "Traffic Camera";
+            _lastCameraAlertTime = DateTime.now();
+          });
+          // Hide after 10 seconds
+          Timer(const Duration(seconds: 10), () {
+            if (mounted) setState(() => _showCameraAlert = false);
+          });
+        }
+        break; // alert once per cycle
+      }
+    }
   }
 
   // ... existing methods ...
@@ -475,13 +552,13 @@ class _MapScreenState extends State<MapScreen> {
   void _selectSearchResult(dynamic result) {
     final position = result['position'];
     final point = LatLng(position['lat'], position['lon']);
-    
+
     // "Pan In" Effect: Smooth transition to destination
     // We don't snap immediately; we let the move animation handle it
-    _mapController.move(point, 17.5); 
-    
+    _mapController.move(point, 17.5);
+
     _setDestination(point);
-    
+
     setState(() {
       _searchResults = [];
       _searchController.text = result['address']['freeformAddress'] ?? '';
@@ -489,24 +566,25 @@ class _MapScreenState extends State<MapScreen> {
       FocusScope.of(context).unfocus(); // Hide keyboard
     });
   }
-  
+
   // Fetch speed limit from our backend which proxies to Azure Maps
   Future<void> _updateSpeedLimit() async {
     final lat = _currentPosition.latitude;
     final lon = _currentPosition.longitude;
     final host = await _getHost();
-    
+
     // Default fallback to null (unknown)
     int? newLimit;
 
     try {
-      final uri = Uri.parse('http://$host:7071/api/speed_limit?lat=$lat&lon=$lon');
+      final uri =
+          Uri.parse('http://$host:7071/api/speed_limit?lat=$lat&lon=$lon');
       final response = await http.get(uri);
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['limit'] != null && data['limit'] is int) {
-           newLimit = data['limit'];
+          newLimit = data['limit'];
         }
       }
     } catch (e) {
@@ -527,20 +605,21 @@ class _MapScreenState extends State<MapScreen> {
       _routeDistance = "Calculating...";
       _currentInstruction = "Calculating route..."; // Feedback
       // Clear search results if set via tap
-      if (_searchResults.isNotEmpty) _searchResults = []; 
+      if (_searchResults.isNotEmpty) _searchResults = [];
     });
-    
+
     await _fetchRealRoute(_currentPosition, point);
   }
 
   Future<void> _fetchRealRoute(LatLng start, LatLng end) async {
-    final String query = '${start.latitude},${start.longitude}:${end.latitude},${end.longitude}';
+    final String query =
+        '${start.latitude},${start.longitude}:${end.latitude},${end.longitude}';
     String icyParam = _winterMode ? "&avoid_icy=true" : "";
     String truckParam = _isTruck ? "&is_truck=true" : "";
-    
+
     final Uri uri = Uri.parse(
         'http://$_resolvedHost:7071/api/route?start_lat=${start.latitude}&start_lon=${start.longitude}&end_lat=${end.latitude}&end_lon=${end.longitude}$icyParam$truckParam');
-        
+
     try {
       final response = await http.get(uri);
       if (response.statusCode == 200) {
@@ -550,25 +629,27 @@ class _MapScreenState extends State<MapScreen> {
           final legs = routes[0]['legs'] as List;
           final points = <LatLng>[];
           if (data['routes'][0]['summary'] != null) {
-              final lengthInMeters = data['routes'][0]['summary']['lengthInMeters'];
-              final miles = (lengthInMeters * 0.000621371).toStringAsFixed(1);
-              if (mounted) {
-                 HapticFeedback.mediumImpact();
-                 setState(() {
-                   _routeDistance = "$miles mi";
-                 });
-              }
+            final lengthInMeters =
+                data['routes'][0]['summary']['lengthInMeters'];
+            final miles = (lengthInMeters * 0.000621371).toStringAsFixed(1);
+            if (mounted) {
+              HapticFeedback.mediumImpact();
+              setState(() {
+                _routeDistance = "$miles mi";
+              });
+            }
           }
           String? instruction;
-          if (data['routes'][0]['guidance'] != null && 
+          if (data['routes'][0]['guidance'] != null &&
               data['routes'][0]['guidance']['instructions'] != null) {
-             final instructions = data['routes'][0]['guidance']['instructions'] as List;
-             if (instructions.isNotEmpty) {
-               instruction = instructions[0]['message'];
-             }
+            final instructions =
+                data['routes'][0]['guidance']['instructions'] as List;
+            if (instructions.isNotEmpty) {
+              instruction = instructions[0]['message'];
+            }
           }
           if (instruction == null && legs.isNotEmpty) {
-             instruction = "Head north towards destination";
+            instruction = "Head north towards destination";
           }
           for (var leg in legs) {
             final pointsData = leg['points'] as List;
@@ -589,42 +670,46 @@ class _MapScreenState extends State<MapScreen> {
       } else {
         debugPrint('Error fetching route: ${response.statusCode}');
         if (mounted) {
-           setState(() {
-             _routeDistance = "Error";
-             _currentInstruction = "Route calculation failed";
-           });
+          setState(() {
+            _routeDistance = "Error";
+            _currentInstruction = "Route calculation failed";
+          });
         }
       }
     } catch (e) {
       debugPrint('Exception fetching route: $e');
-         if (mounted) {
-           setState(() {
-             _routeDistance = "Error";
-               _currentInstruction = "Error connecting to service";
-           });
-        }
+      if (mounted) {
+        setState(() {
+          _routeDistance = "Error";
+          _currentInstruction = "Error connecting to service";
+        });
+      }
     }
   }
 
   void _startListening() {
-    // UserAccelerometerEvent describes the acceleration of the device, 
+    // UserAccelerometerEvent describes the acceleration of the device,
     // adjusting for gravity.
-    _accelerometerSubscription = userAccelerometerEventStream().listen((UserAccelerometerEvent event) {
-      double gForce = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
-      
+    _accelerometerSubscription =
+        userAccelerometerEventStream().listen((UserAccelerometerEvent event) {
+      double gForce =
+          sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+
       // Safety Score Logic: Hard Braking / Cornering (G-Force > 5 but < 15)
       if (gForce > 5 && gForce < 15) {
-         SafetyService.instance.recordEvent("Hard Braking", "G-Force: ${gForce.toStringAsFixed(1)}g", 5.0);
+        SafetyService.instance.recordEvent(
+            "Hard Braking", "G-Force: ${gForce.toStringAsFixed(1)}g", 5.0);
       }
 
       // Threshold > 15 as per requirements for CRASH
       if (gForce > 15) {
         // Haptic Heartbeat: Heavy Impact for CRASH
         HapticFeedback.heavyImpact();
-        
+
         DateTime now = DateTime.now();
         // Debounce to prevent multiple API calls
-        if (_lastShakeTime == null || now.difference(_lastShakeTime!) > const Duration(seconds: 5)) {
+        if (_lastShakeTime == null ||
+            now.difference(_lastShakeTime!) > const Duration(seconds: 5)) {
           _lastShakeTime = now;
           _triggerCrash(gForce);
         }
@@ -638,10 +723,12 @@ class _MapScreenState extends State<MapScreen> {
     if (defaultTargetPlatform == TargetPlatform.android) return '10.0.2.2';
     return 'localhost';
   }
-  
+
   String get _resolvedHost {
-     if (kIsWeb) return "localhost";
-     return defaultTargetPlatform == TargetPlatform.android ? "10.0.2.2" : "127.0.0.1";
+    if (kIsWeb) return "localhost";
+    return defaultTargetPlatform == TargetPlatform.android
+        ? "10.0.2.2"
+        : "127.0.0.1";
   }
 
   Future<void> _triggerCrash(double gForce) async {
@@ -653,7 +740,7 @@ class _MapScreenState extends State<MapScreen> {
     try {
       final host = await _getHost();
       final response = await http.post(
-        Uri.parse('http://$host:7071/api/telemetry'), 
+        Uri.parse('http://$host:7071/api/telemetry'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'lat': _initialCenter.latitude,
@@ -678,14 +765,17 @@ class _MapScreenState extends State<MapScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text("REPORT INCIDENT", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              Text("REPORT INCIDENT",
+                  style: GoogleFonts.montserrat(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18)),
               const SizedBox(height: 16),
               _buildReportOption("CRASH", Icons.car_crash, Colors.red),
               const SizedBox(height: 8),
               _buildReportOption("FLAT TIRE", Icons.tire_repair, Colors.orange),
               const SizedBox(height: 8),
               _buildReportOption("STOPPED CAR", Icons.warning, Colors.yellow),
-
             ],
           ),
         ),
@@ -699,13 +789,15 @@ class _MapScreenState extends State<MapScreen> {
     // 1. Calculate Distance to Destination
     double totalDist = 0;
     for (int i = 0; i < _routePoints.length - 1; i++) {
-      totalDist += const Distance().as(LengthUnit.Mile, _routePoints[i], _routePoints[i+1]);
+      totalDist += const Distance()
+          .as(LengthUnit.Mile, _routePoints[i], _routePoints[i + 1]);
     }
     // Add distance from current to start of route remainder
     if (_routePoints.isNotEmpty) {
-       totalDist += const Distance().as(LengthUnit.Mile, currentPos, _routePoints.first);
+      totalDist +=
+          const Distance().as(LengthUnit.Mile, currentPos, _routePoints.first);
     }
-    
+
     // 2. Generate Instruction (Simulated)
     // In a real app, this comes from OSRM steps.
     // For now, we just say "Continue on current road" or "Turn right in X miles"
@@ -720,13 +812,14 @@ class _MapScreenState extends State<MapScreen> {
       _routeDistance = "${totalDist.toStringAsFixed(1)} mi";
       _currentInstruction = instruction;
     });
-    
+
     // Remove passed points (simple heuristic)
     if (_routePoints.isNotEmpty) {
-       final distToFirst = const Distance().as(LengthUnit.Meter, currentPos, _routePoints.first);
-       if (distToFirst < 30) {
-         _routePoints.removeAt(0);
-       }
+      final distToFirst =
+          const Distance().as(LengthUnit.Meter, currentPos, _routePoints.first);
+      if (distToFirst < 30) {
+        _routePoints.removeAt(0);
+      }
     }
   }
 
@@ -747,7 +840,9 @@ class _MapScreenState extends State<MapScreen> {
           children: [
             Icon(icon, color: color),
             const SizedBox(width: 12),
-            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -763,13 +858,15 @@ class _MapScreenState extends State<MapScreen> {
         'type': type,
         'description': 'Reported by user',
       });
-      
+
       // Haptic Feedback
       HapticFeedback.heavyImpact();
     });
 
     try {
-      final host = defaultTargetPlatform == TargetPlatform.android ? '10.0.2.2' : 'localhost';
+      final host = defaultTargetPlatform == TargetPlatform.android
+          ? '10.0.2.2'
+          : 'localhost';
       await http.post(
         Uri.parse('http://$host:7071/api/report_incident'),
         headers: {'Content-Type': 'application/json'},
@@ -782,7 +879,9 @@ class _MapScreenState extends State<MapScreen> {
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Incident Reported to Community"), backgroundColor: Colors.green),
+          const SnackBar(
+              content: Text("Incident Reported to Community"),
+              backgroundColor: Colors.green),
         );
       }
     } catch (e) {
@@ -793,15 +892,16 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _fetchIncidents() async {
     try {
       final host = await _getHost();
-      final response = await http.get(Uri.parse('http://$host:7071/api/incidents'));
-      
+      final response =
+          await http.get(Uri.parse('http://$host:7071/api/incidents'));
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (mounted) {
-           setState(() {
-             _incidents = data['incidents'];
-           });
-           _checkForRouteIncidents(); // Scan route whenever incidents update
+          setState(() {
+            _incidents = data['incidents'];
+          });
+          _checkForRouteIncidents(); // Scan route whenever incidents update
         }
       }
     } catch (e) {
@@ -812,21 +912,22 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _fetchCameras() async {
     try {
       final host = await _getHost();
-      final response = await http.get(Uri.parse('http://$host:7071/api/cameras'));
-      
+      final response =
+          await http.get(Uri.parse('http://$host:7071/api/cameras'));
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final host = await _getHost();
         if (mounted) {
-           setState(() {
-             // Map cameras to use our proxy for image loading
-             _cameras = (data['cameras'] as List).map((c) {
-               return {
-                 ...c,
-                 'proxyUrl': 'http://$host:7071/api/camera_proxy/${c['id']}'
-               };
-             }).toList();
-           });
+          setState(() {
+            // Map cameras to use our proxy for image loading
+            _cameras = (data['cameras'] as List).map((c) {
+              return {
+                ...c,
+                'proxyUrl': 'http://$host:7071/api/camera_proxy/${c['id']}'
+              };
+            }).toList();
+          });
         }
       }
     } catch (e) {
@@ -837,14 +938,15 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _fetchTrafficStatus() async {
     try {
       final host = await _getHost();
-      final response = await http.get(Uri.parse('http://$host:7071/api/traffic_status'));
-      
+      final response =
+          await http.get(Uri.parse('http://$host:7071/api/traffic_status'));
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (mounted) {
-           setState(() {
-             _trafficSegments = data['traffic'];
-           });
+          setState(() {
+            _trafficSegments = data['traffic'];
+          });
         }
       }
     } catch (e) {
@@ -865,9 +967,11 @@ class _MapScreenState extends State<MapScreen> {
       // Heuristic: Check every 50th point on route for efficiency, or if route is short, every point.
       bool isOnRoute = false;
       int step = _routePoints.length > 100 ? 50 : 5;
-      
+
       for (int i = 0; i < _routePoints.length; i += step) {
-        if (distance.as(LengthUnit.Meter, _routePoints[i], incidentPos) < 1000) { // 1km radius
+        if (distance.as(LengthUnit.Meter, _routePoints[i], incidentPos) <
+            1000) {
+          // 1km radius
           isOnRoute = true;
           break;
         }
@@ -893,7 +997,11 @@ class _MapScreenState extends State<MapScreen> {
             children: [
               const Icon(Icons.psychology, color: Colors.blueAccent, size: 48),
               const SizedBox(height: 12),
-              Text("AI ROUTE ALERT", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              Text("AI ROUTE ALERT",
+                  style: GoogleFonts.montserrat(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18)),
               const SizedBox(height: 8),
               Text(
                 incident['description'] ?? "Incident detected on your path.",
@@ -908,31 +1016,42 @@ class _MapScreenState extends State<MapScreen> {
                     onPressed: () {
                       Navigator.pop(ctx);
                       final camera = _cameras.firstWhere(
-                        (c) => (c['lat'] - incident['lat']).abs() < 0.005 && (c['lon'] - incident['lon']).abs() < 0.005,
+                        (c) =>
+                            (c['lat'] - incident['lat']).abs() < 0.005 &&
+                            (c['lon'] - incident['lon']).abs() < 0.005,
                         orElse: () => null,
                       );
                       if (camera != null) {
                         _showCameraFeed(camera);
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No camera stream available for this location.")));
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text(
+                                "No camera stream available for this location.")));
                       }
                     },
-                    child: const Text("VIEW FEED", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
+                    child: const Text("VIEW FEED",
+                        style: TextStyle(
+                            color: Colors.blueAccent,
+                            fontWeight: FontWeight.bold)),
                   ),
                   TextButton(
                     onPressed: () {
                       Navigator.pop(ctx);
                       // In a real app, this would trigger an alternative route search
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Recalculating alternative route...")));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text("Recalculating alternative route...")));
                     },
-                    child: const Text("RE-ROUTE", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                    child: const Text("RE-ROUTE",
+                        style: TextStyle(
+                            color: Colors.orange, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text("IGNORE", style: TextStyle(color: Colors.white24)),
+                child: const Text("IGNORE",
+                    style: TextStyle(color: Colors.white24)),
               ),
             ],
           ),
@@ -950,7 +1069,11 @@ class _MapScreenState extends State<MapScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(camera['name'], style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              Text(camera['name'],
+                  style: GoogleFonts.montserrat(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18)),
               const SizedBox(height: 16),
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
@@ -960,18 +1083,26 @@ class _MapScreenState extends State<MapScreen> {
                     if (loadingProgress == null) return child;
                     return const Center(child: CircularProgressIndicator());
                   },
-                  errorBuilder: (context, error, stackTrace) => const Center(child: Icon(Icons.videocam_off, color: Colors.white, size: 50)),
+                  errorBuilder: (context, error, stackTrace) => const Center(
+                      child: Icon(Icons.videocam_off,
+                          color: Colors.white, size: 50)),
                 ),
               ),
               const SizedBox(height: 16),
-              Text("Source: TxDOT TransGuide", style: GoogleFonts.montserrat(color: Colors.white54, fontSize: 12)),
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CLOSE", style: TextStyle(color: Colors.orange))),
+              Text("Source: TxDOT TransGuide",
+                  style: GoogleFonts.montserrat(
+                      color: Colors.white54, fontSize: 12)),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("CLOSE",
+                      style: TextStyle(color: Colors.orange))),
             ],
           ),
         ),
       ),
     );
   }
+
   @override
   void dispose() {
     _mapController.dispose();
@@ -1003,21 +1134,23 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _endDriveMode() {
-     NavigationService.instance.stopNavigation();
-     setState(() {
-       _isFollowingUser = false;
-       _currentInstruction = null;
-       _speedLimit = null; // Reset
-       _routePoints = [];
-     });
+    NavigationService.instance.stopNavigation();
+    setState(() {
+      _isFollowingUser = false;
+      _currentInstruction = null;
+      _speedLimit = null; // Reset
+      _routePoints = [];
+    });
   }
-  
+
   // Speed Limit Logic
   DateTime? _lastSpeedLimitFetch;
-  
+
   Future<void> _fetchSpeedLimit(LatLng pos) async {
     // Throttle: Only fetch every 15 seconds to be kind to Overpass API
-    if (_lastSpeedLimitFetch != null && DateTime.now().difference(_lastSpeedLimitFetch!) < const Duration(seconds: 15)) {
+    if (_lastSpeedLimitFetch != null &&
+        DateTime.now().difference(_lastSpeedLimitFetch!) <
+            const Duration(seconds: 15)) {
       return;
     }
     _lastSpeedLimitFetch = DateTime.now();
@@ -1025,40 +1158,43 @@ class _MapScreenState extends State<MapScreen> {
     try {
       // Overpass QL: Find ways around the point with 'maxspeed' tag
       final String radius = "25";
-      final String query = '[out:json];way(around:$radius,${pos.latitude},${pos.longitude})["maxspeed"];out tags;';
-      final Uri url = Uri.parse('https://overpass-api.de/api/interpreter?data=$query');
+      final String query =
+          '[out:json];way(around:$radius,${pos.latitude},${pos.longitude})["maxspeed"];out tags;';
+      final Uri url =
+          Uri.parse('https://overpass-api.de/api/interpreter?data=$query');
 
       final response = await http.get(url);
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final elements = data['elements'] as List;
-        
-        if (elements.isNotEmpty) {
-           // Get the first match's maxspeed
-           final tags = elements.first['tags'];
-           if (tags != null && tags['maxspeed'] != null) {
-             String rawSpeed = tags['maxspeed'];
-             // Parse "30 mph" or "50"
-             int? limit;
-             
-             if (rawSpeed.toLowerCase().contains("mph")) {
-               limit = int.tryParse(rawSpeed.replaceAll(RegExp(r'[^0-9]'), ''));
-             } else if (rawSpeed.toLowerCase().contains("km/h")) {
-               // Convert km/h to mph (approx 0.62)
-               int? kph = int.tryParse(rawSpeed.replaceAll(RegExp(r'[^0-9]'), ''));
-               if (kph != null) limit = (kph * 0.621371).round();
-             } else {
-               // Improve heuristic: Default to MPH for now (US context)
-               limit = int.tryParse(rawSpeed);
-             }
 
-             if (limit != null && mounted) {
-               setState(() {
-                 _speedLimit = limit;
-               });
-             }
-           }
+        if (elements.isNotEmpty) {
+          // Get the first match's maxspeed
+          final tags = elements.first['tags'];
+          if (tags != null && tags['maxspeed'] != null) {
+            String rawSpeed = tags['maxspeed'];
+            // Parse "30 mph" or "50"
+            int? limit;
+
+            if (rawSpeed.toLowerCase().contains("mph")) {
+              limit = int.tryParse(rawSpeed.replaceAll(RegExp(r'[^0-9]'), ''));
+            } else if (rawSpeed.toLowerCase().contains("km/h")) {
+              // Convert km/h to mph (approx 0.62)
+              int? kph =
+                  int.tryParse(rawSpeed.replaceAll(RegExp(r'[^0-9]'), ''));
+              if (kph != null) limit = (kph * 0.621371).round();
+            } else {
+              // Improve heuristic: Default to MPH for now (US context)
+              limit = int.tryParse(rawSpeed);
+            }
+
+            if (limit != null && mounted) {
+              setState(() {
+                _speedLimit = limit;
+              });
+            }
+          }
         }
       }
     } catch (e) {
@@ -1071,371 +1207,412 @@ class _MapScreenState extends State<MapScreen> {
     // Note: Removed Scaffold to rely on MainScaffold.
     // Adjust bottom padding to account for floating GlassNavBar (~100px height)
     return Stack(
-        children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _initialCenter,
-              initialZoom: 13.0,
-              onPositionChanged: (position, hasGesture) {
-                if (hasGesture) {
-                  setState(() => _isFollowingUser = false);
-                }
-              },
-              onTap: (tapPosition, point) {
-                _setDestination(point);
-              },
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _initialCenter,
+            initialZoom: 13.0,
+            onPositionChanged: (position, hasGesture) {
+              if (hasGesture) {
+                setState(() => _isFollowingUser = false);
+              }
+            },
+            onTap: (tapPosition, point) {
+              _setDestination(point);
+            },
+          ),
+          children: [
+            TileLayer(
+              // Switch to CartoDB Dark Matter (Reliable, Dark Theme, No Key issues on Web)
+              urlTemplate:
+                  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+              subdomains: const ['a', 'b', 'c', 'd'],
+              userAgentPackageName: 'com.example.cruze_mobile',
             ),
-            children: [
-              TileLayer(
-                // Correct Azure Maps V2 Tile URL (singular 'tile', needs tilesetId)
-                urlTemplate: 'https://atlas.microsoft.com/map/tile?api-version=2.0&tilesetId=microsoft.base.darkgrey&zoom={z}&x={x}&y={y}&subscription-key={subscriptionKey}',
-                additionalOptions: {
-                  'subscriptionKey': azureKey,
-                },
-                userAgentPackageName: 'com.example.cruze_mobile',
-              ),
-              // High Risk Zones Layer
-              CircleLayer(
-                circles: _highRiskZones.map((zone) => CircleMarker(
-                  point: zone,
-                  color: Colors.red.withOpacity(0.3),
-                  borderColor: Colors.red.withOpacity(0.7),
-                  borderStrokeWidth: 2,
-                  radius: 500, 
-                  useRadiusInMeter: true,
-                )).toList(),
-              ),
+            // High Risk Zones Layer
+            CircleLayer(
+              circles: _highRiskZones
+                  .map((zone) => CircleMarker(
+                        point: zone,
+                        color: Colors.red.withOpacity(0.3),
+                        borderColor: Colors.red.withOpacity(0.7),
+                        borderStrokeWidth: 2,
+                        radius: 500,
+                        useRadiusInMeter: true,
+                      ))
+                  .toList(),
+            ),
 
-              // AI TRAFFIC LAYER (Colored segments)
-              PolylineLayer(
-                polylines: _trafficSegments.map((seg) {
-                  final speed = seg['speed'] as int;
-                  Color trafficColor = Colors.green;
-                  if (speed < 30) trafficColor = Colors.red;
-                  else if (speed < 60) trafficColor = Colors.yellow;
+            // AI TRAFFIC LAYER (Colored segments)
+            PolylineLayer(
+              polylines: _trafficSegments.map((seg) {
+                final speed = seg['speed'] as int;
+                Color trafficColor = Colors.green;
+                if (speed < 30)
+                  trafficColor = Colors.red;
+                else if (speed < 60) trafficColor = Colors.yellow;
 
-                  // Each segment is mocked as a short line around the camera for now
-                  // In production, this would be a real GPS segment
-                  final center = LatLng(seg['lat'], seg['lon']);
-                  return Polyline(
-                    points: [
-                      LatLng(center.latitude - 0.005, center.longitude - 0.005),
-                      LatLng(center.latitude + 0.005, center.longitude + 0.005),
-                    ],
-                    color: trafficColor.withOpacity(0.7),
-                    strokeWidth: 6.0,
-                  );
-                }).toList(),
-              ),
-
-
-              PolylineLayer(
-                polylines: [
-                  if (_routePoints.isNotEmpty) ...[
-                    // ... existing polylines ...
-                    // Glow Layer 1 (Outer Blur)
-                    Polyline(
-                      points: _routePoints,
-                      color: const Color(0xFFff791a).withOpacity(0.2),
-                      strokeWidth: 20.0,
-                    ),
-                    // Glow Layer 2 (Inner Blur)
-                    Polyline(
-                      points: _routePoints,
-                      color: const Color(0xFFff791a).withOpacity(0.5),
-                      strokeWidth: 10.0,
-                    ),
-                    // Core Line (Bright)
-                    Polyline(
-                      points: _routePoints,
-                      color: const Color(0xFFff791a), // Safety Orange
-                      strokeWidth: 4.0,
-                    ),
+                // Each segment is mocked as a short line around the camera for now
+                // In production, this would be a real GPS segment
+                final center = LatLng(seg['lat'], seg['lon']);
+                return Polyline(
+                  points: [
+                    LatLng(center.latitude - 0.005, center.longitude - 0.005),
+                    LatLng(center.latitude + 0.005, center.longitude + 0.005),
                   ],
+                  color: trafficColor.withOpacity(0.7),
+                  strokeWidth: 6.0,
+                );
+              }).toList(),
+            ),
+
+            PolylineLayer(
+              polylines: [
+                if (_routePoints.isNotEmpty) ...[
+                  // ... existing polylines ...
+                  // Glow Layer 1 (Outer Blur)
+                  Polyline(
+                    points: _routePoints,
+                    color: const Color(0xFFff791a).withOpacity(0.2),
+                    strokeWidth: 20.0,
+                  ),
+                  // Glow Layer 2 (Inner Blur)
+                  Polyline(
+                    points: _routePoints,
+                    color: const Color(0xFFff791a).withOpacity(0.5),
+                    strokeWidth: 10.0,
+                  ),
+                  // Core Line (Bright)
+                  Polyline(
+                    points: _routePoints,
+                    color: const Color(0xFFff791a), // Safety Orange
+                    strokeWidth: 4.0,
+                  ),
                 ],
-              ),
-              MarkerLayer(
-                markers: [
-                   // High Risk Zone Icons
-                   ..._highRiskZones.map((zone) => Marker(
+              ],
+            ),
+            MarkerLayer(
+              markers: [
+                // High Risk Zone Icons
+                ..._highRiskZones.map((zone) => Marker(
                       point: zone,
                       width: 30,
                       height: 30,
-                      child: const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 24),
-                   )),
-                   
-                   // INCIDENT MARKERS (Filtered to 1 mile radius)
-                   ..._incidents.where((incident) {
-                      final LatLng incidentPos = LatLng(incident['lat'], incident['lon']);
-                      const Distance distance = Distance();
-                      // 1 mile = ~1609 meters
-                      return distance.as(LengthUnit.Meter, _currentPosition, incidentPos) <= 1609;
-                   }).map((incident) {
-                      IconData icon = Icons.warning;
-                      Color color = Colors.orange;
-                      if (incident['type'] == 'CRASH') { icon = Icons.car_crash; color = Colors.red; }
-                      if (incident['type'] == 'FLAT TIRE') { icon = Icons.tire_repair; color = Colors.orange; }
-                      if (incident['type'] == 'STOPPED CAR') { icon = Icons.warning; color = Colors.yellow; }
-                      
-                      return Marker(
-                        point: LatLng(incident['lat'], incident['lon']),
-                        width: 40,
-                        height: 40,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.5),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: color, width: 2),
-                          ),
-                          child: Icon(icon, color: color, size: 20),
-                        ),
-                      );
-                   }),
+                      child: const Icon(Icons.warning_amber_rounded,
+                          color: Colors.redAccent, size: 24),
+                    )),
 
-                  Marker(
-                    point: _currentPosition,
+                // INCIDENT MARKERS (Filtered to 1 mile radius)
+                ..._incidents.where((incident) {
+                  final LatLng incidentPos =
+                      LatLng(incident['lat'], incident['lon']);
+                  const Distance distance = Distance();
+                  // 1 mile = ~1609 meters
+                  return distance.as(
+                          LengthUnit.Meter, _currentPosition, incidentPos) <=
+                      1609;
+                }).map((incident) {
+                  IconData icon = Icons.warning;
+                  Color color = Colors.orange;
+                  if (incident['type'] == 'CRASH') {
+                    icon = Icons.car_crash;
+                    color = Colors.red;
+                  }
+                  if (incident['type'] == 'FLAT TIRE') {
+                    icon = Icons.tire_repair;
+                    color = Colors.orange;
+                  }
+                  if (incident['type'] == 'STOPPED CAR') {
+                    icon = Icons.warning;
+                    color = Colors.yellow;
+                  }
+
+                  return Marker(
+                    point: LatLng(incident['lat'], incident['lon']),
                     width: 40,
                     height: 40,
                     child: Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFff791a).withOpacity(0.2),
+                        color: Colors.black.withOpacity(0.5),
                         shape: BoxShape.circle,
+                        border: Border.all(color: color, width: 2),
                       ),
-                      child: const Icon(
-                        Icons.navigation,
-                        color: Color(0xFFff791a), // Safety Orange
-                        size: 30,
-                      ),
+                      child: Icon(icon, color: color, size: 20),
+                    ),
+                  );
+                }),
+
+                Marker(
+                  point: _currentPosition,
+                  width: 40,
+                  height: 40,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFff791a).withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.navigation,
+                      color: Color(0xFFff791a), // Safety Orange
+                      size: 30,
                     ),
                   ),
-                  if (_destination != null)
-                     Marker(
-                      point: _destination!,
-                      width: 40,
-                      height: 40,
-                      child: const Icon(
-                        Icons.location_on,
-                        color: Colors.red,
-                        size: 40,
-                      ),
+                ),
+                if (_destination != null)
+                  Marker(
+                    point: _destination!,
+                    width: 40,
+                    height: 40,
+                    child: const Icon(
+                      Icons.location_on,
+                      color: Colors.red,
+                      size: 40,
                     ),
-                ],
-              ),
-            ],
-          ),
-
-          // SIGNAL GLIDE OVERLAY (Rights Side - Integrated below buttons)
-          if (_signalData != null)
-            Positioned(
-              top: 350, 
-              right: 16,
-              child: SignalRing(
-                recommendedSpeed: _signalData!['recommended_speed'] ?? 35,
-                status: _signalData!['state'] ?? "GREEN",
-                timeToGreen: (_signalData!['time_to_green'] ?? 0).toDouble(),
-              ),
-            ),
-          if (_laneMatch != null)
-            Positioned(
-              top: 480,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  "Lane: ${_laneMatch!['lane_id'] ?? 'UNKNOWN'} (${((_laneMatch!['confidence'] as num?) ?? 0).toStringAsFixed(2)})",
-                  style: GoogleFonts.montserrat(color: Colors.white, fontSize: 12),
-                ),
-              ),
-            ),
-
-          // GHOST LOCK TOGGLE (Top Right)
-          Positioned(
-            top: 60,
-            right: 20,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton.small(
-                  heroTag: "ghost_lock",
-                  backgroundColor: _ghostLockActive ? Colors.purpleAccent : Colors.grey[800],
-                  onPressed: _toggleGhostLock,
-                  child: const Icon(Icons.gps_off, color: Colors.white),
-                ),
-                const SizedBox(height: 10),
-                FloatingActionButton.small(
-                  heroTag: "winter_mode",
-                  backgroundColor: _winterMode ? Colors.lightBlue : Colors.grey[800],
-                  onPressed: _toggleWinterMode,
-                  child: const Icon(Icons.ac_unit, color: Colors.white),
-                ),
-                const SizedBox(height: 10),
-                FloatingActionButton.small(
-                  heroTag: "truck_mode",
-                  backgroundColor: _isTruck ? Colors.indigo : Colors.grey[800],
-                  onPressed: _toggleTruckMode,
-                  child: const Icon(Icons.local_shipping, color: Colors.white),
-                ),
-                const SizedBox(height: 10),
-                FloatingActionButton.small(
-                  heroTag: "black_box",
-                  backgroundColor: Colors.black,
-                  onPressed: () {
-                     BlackBoxService.instance.triggerUpload();
-                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("📦 BLACK BOX UPLOADING..."), backgroundColor: Colors.black));
-                  },
-                  child: const Icon(Icons.sd_storage, color: Colors.white),
-                ),
-                const SizedBox(height: 10),
-                // Recenter Button (Integrated)
-                if (!_isFollowingUser)
-                  FloatingActionButton.small(
-                    heroTag: "recenter_fab",
-                    onPressed: () {
-                      setState(() {
-                        _isFollowingUser = true;
-                        _mapController.move(_currentPosition, 17.5);
-                      });
-                    },
-                    backgroundColor: const Color(0xFFff791a),
-                    child: const Icon(Icons.my_location, color: Colors.white),
                   ),
               ],
             ),
+          ],
+        ),
+
+        // SIGNAL GLIDE OVERLAY (Rights Side - Integrated below buttons)
+        if (_signalData != null)
+          Positioned(
+            top: 350,
+            right: 16,
+            child: SignalRing(
+              recommendedSpeed: _signalData!['recommended_speed'] ?? 35,
+              status: _signalData!['state'] ?? "GREEN",
+              timeToGreen: (_signalData!['time_to_green'] ?? 0).toDouble(),
+            ),
+          ),
+        if (_laneMatch != null)
+          Positioned(
+            top: 480,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                "Lane: ${_laneMatch!['lane_id'] ?? 'UNKNOWN'} (${((_laneMatch!['confidence'] as num?) ?? 0).toStringAsFixed(2)})",
+                style:
+                    GoogleFonts.montserrat(color: Colors.white, fontSize: 12),
+              ),
+            ),
           ),
 
-          // LANE GUIDANCE OVERLAY (Top Center)
-          if (_laneAdvice != null && _laneAdvice!['lane'] != 'CENTER')
-            Positioned(
-              top: 100,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.blueAccent.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [BoxShadow(color: Colors.blueAccent.withOpacity(0.5), blurRadius: 10)],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _laneAdvice!['lane'] == 'LEFT' ? Icons.arrow_back : Icons.arrow_forward,
+        // GHOST LOCK TOGGLE (Top Right)
+        Positioned(
+          top: 60,
+          right: 20,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FloatingActionButton.small(
+                heroTag: "ghost_lock",
+                backgroundColor:
+                    _ghostLockActive ? Colors.purpleAccent : Colors.grey[800],
+                onPressed: _toggleGhostLock,
+                child: const Icon(Icons.gps_off, color: Colors.white),
+              ),
+              const SizedBox(height: 10),
+              FloatingActionButton.small(
+                heroTag: "winter_mode",
+                backgroundColor:
+                    _winterMode ? Colors.lightBlue : Colors.grey[800],
+                onPressed: _toggleWinterMode,
+                child: const Icon(Icons.ac_unit, color: Colors.white),
+              ),
+              const SizedBox(height: 10),
+              FloatingActionButton.small(
+                heroTag: "truck_mode",
+                backgroundColor: _isTruck ? Colors.indigo : Colors.grey[800],
+                onPressed: _toggleTruckMode,
+                child: const Icon(Icons.local_shipping, color: Colors.white),
+              ),
+              const SizedBox(height: 10),
+              FloatingActionButton.small(
+                heroTag: "black_box",
+                backgroundColor: Colors.black,
+                onPressed: () {
+                  BlackBoxService.instance.triggerUpload();
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text("📦 BLACK BOX UPLOADING..."),
+                      backgroundColor: Colors.black));
+                },
+                child: const Icon(Icons.sd_storage, color: Colors.white),
+              ),
+              const SizedBox(height: 10),
+              // Recenter Button (Integrated)
+              if (!_isFollowingUser)
+                FloatingActionButton.small(
+                  heroTag: "recenter_fab",
+                  onPressed: () {
+                    setState(() {
+                      _isFollowingUser = true;
+                      _mapController.move(_currentPosition, 17.5);
+                    });
+                  },
+                  backgroundColor: const Color(0xFFff791a),
+                  child: const Icon(Icons.my_location, color: Colors.white),
+                ),
+            ],
+          ),
+        ),
+
+        // LANE GUIDANCE OVERLAY (Top Center)
+        if (_laneAdvice != null && _laneAdvice!['lane'] != 'CENTER')
+          Positioned(
+            top: 100,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.blueAccent.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.blueAccent.withOpacity(0.5),
+                        blurRadius: 10)
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _laneAdvice!['lane'] == 'LEFT'
+                          ? Icons.arrow_back
+                          : Icons.arrow_forward,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      "MERGE ${_laneAdvice!['lane']} (${_laneAdvice!['reason']})",
+                      style: GoogleFonts.montserrat(
                         color: Colors.white,
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        "MERGE ${_laneAdvice!['lane']} (${_laneAdvice!['reason']})",
-                        style: GoogleFonts.montserrat(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
-          
-           // Start Button (ValueListenable)
-           ValueListenableBuilder<bool>(
-             valueListenable: NavigationService.instance.isNavigating,
-             builder: (context, isNavigating, child) {
-               if (_routePoints.isNotEmpty && !isNavigating) {
-                  return Positioned(
-                     bottom: 120 + MediaQuery.of(context).padding.bottom, // Dynamic padding
-                     left: 20, 
-                     right: 20,
-                     child: Column(
-                       children: [
-                          GlassCard(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                                children: [
-                                  _buildRouteStat(Icons.timer, (_routeDistance != null && _routeDistance!.contains("mi")) ? "12 min" : "--"), 
-                                  _buildRouteStat(Icons.directions_car, _routeDistance ?? "--"),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: _startDriveMode,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFff791a), // Safety Orange
-                              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                              elevation: 8,
-                              shadowColor: const Color(0xFFff791a).withOpacity(0.5),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.navigation, color: Colors.white),
-                                const SizedBox(width: 8),
-                                Text(
-                                  "START NAVIGATION", 
-                                  style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)
-                                ),
-                              ],
-                            ),
-                          ),
-                       ],
-                     ),
-                  );
-               }
-               return const SizedBox.shrink();
-             },
-           ),
+          ),
 
-           // End Trip Button (ValueListenable)
-           ValueListenableBuilder<bool>(
-             valueListenable: NavigationService.instance.isNavigating,
-             builder: (context, isNavigating, child) {
-                if (isNavigating) {
-                   return Positioned(
-                     bottom: 40 + MediaQuery.of(context).padding.bottom, 
-                     left: 0,
-                     right: 0,
-                     child: Center(
-                       child: FloatingActionButton.extended(
-                         onPressed: _endDriveMode,
-                         backgroundColor: Colors.redAccent,
-                         icon: const Icon(Icons.close, color: Colors.white),
-                         label: Text("END TRIP", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.white)),
-                       ),
-                     ),
-                   );
-                }
-                return const SizedBox.shrink();
-             },
-           ),
+        // Start Button (ValueListenable)
+        ValueListenableBuilder<bool>(
+          valueListenable: NavigationService.instance.isNavigating,
+          builder: (context, isNavigating, child) {
+            if (_routePoints.isNotEmpty && !isNavigating) {
+              return Positioned(
+                bottom: 120 +
+                    MediaQuery.of(context).padding.bottom, // Dynamic padding
+                left: 20,
+                right: 20,
+                child: Column(
+                  children: [
+                    GlassCard(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _buildRouteStat(
+                                Icons.timer,
+                                (_routeDistance != null &&
+                                        _routeDistance!.contains("mi"))
+                                    ? "12 min"
+                                    : "--"),
+                            _buildRouteStat(
+                                Icons.directions_car, _routeDistance ?? "--"),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _startDriveMode,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            const Color(0xFFff791a), // Safety Orange
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 40, vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30)),
+                        elevation: 8,
+                        shadowColor: const Color(0xFFff791a).withOpacity(0.5),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.navigation, color: Colors.white),
+                          const SizedBox(width: 8),
+                          Text("START NAVIGATION",
+                              style: GoogleFonts.montserrat(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  fontSize: 16)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        ),
 
-           // Search Bar (Hidden in Drive Mode)
-           ValueListenableBuilder<bool>(
-             valueListenable: NavigationService.instance.isNavigating,
-             builder: (context, isNavigating, child) {
-               return AnimatedPositioned(
-                 duration: const Duration(milliseconds: 300),
-                 curve: Curves.easeInOut,
-                 top: 0, // Always visible (Shows Search in Idle, Instructions in Nav)
-                 left: 0,
-                 right: 0,
-                 child: SafeArea( 
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    constraints: const BoxConstraints(maxWidth: 600),
-                    child: !isNavigating
+        // End Trip Button (ValueListenable)
+        ValueListenableBuilder<bool>(
+          valueListenable: NavigationService.instance.isNavigating,
+          builder: (context, isNavigating, child) {
+            if (isNavigating) {
+              return Positioned(
+                bottom: 40 + MediaQuery.of(context).padding.bottom,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: FloatingActionButton.extended(
+                    onPressed: _endDriveMode,
+                    backgroundColor: Colors.redAccent,
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    label: Text("END TRIP",
+                        style: GoogleFonts.montserrat(
+                            fontWeight: FontWeight.bold, color: Colors.white)),
+                  ),
+                ),
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+
+        // Search Bar (Hidden in Drive Mode)
+        ValueListenableBuilder<bool>(
+          valueListenable: NavigationService.instance.isNavigating,
+          builder: (context, isNavigating, child) {
+            return AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+              top:
+                  0, // Always visible (Shows Search in Idle, Instructions in Nav)
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: Container(
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: !isNavigating
                       ? // Search Mode OR Preview Mode (Show Search Bar)
-                        GlassCard(
+                      GlassCard(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -1444,28 +1621,36 @@ class _MapScreenState extends State<MapScreen> {
                                 onChanged: _onSearchChanged,
                                 style: const TextStyle(color: Colors.white),
                                 decoration: InputDecoration(
-                                  hintText: _destination != null ? 'Tap to clear destination...' : 'Search destination...',
+                                  hintText: _destination != null
+                                      ? 'Tap to clear destination...'
+                                      : 'Search destination...',
                                   hintStyle: TextStyle(color: Colors.grey[600]),
-                                  prefixIcon: const Icon(Icons.search, color: Color(0xFFff791a)),
-                                  suffixIcon: _searchController.text.isNotEmpty || _destination != null
-                                      ? IconButton(
-                                          icon: const Icon(Icons.clear, color: Colors.grey),
-                                          onPressed: () {
-                                            _searchController.clear();
-                                            if (_destination != null) {
-                                               _setDestination(const LatLng(0,0));
-                                               setState(() {
-                                                  _destination = null;
-                                                  _routePoints = [];
-                                               });
-                                            } else {
-                                               _onSearchChanged('');
-                                            }
-                                          },
-                                        )
-                                      : null,
+                                  prefixIcon: const Icon(Icons.search,
+                                      color: Color(0xFFff791a)),
+                                  suffixIcon:
+                                      _searchController.text.isNotEmpty ||
+                                              _destination != null
+                                          ? IconButton(
+                                              icon: const Icon(Icons.clear,
+                                                  color: Colors.grey),
+                                              onPressed: () {
+                                                _searchController.clear();
+                                                if (_destination != null) {
+                                                  _setDestination(
+                                                      const LatLng(0, 0));
+                                                  setState(() {
+                                                    _destination = null;
+                                                    _routePoints = [];
+                                                  });
+                                                } else {
+                                                  _onSearchChanged('');
+                                                }
+                                              },
+                                            )
+                                          : null,
                                   border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 14),
                                 ),
                               ),
                               if (_isSearching)
@@ -1478,248 +1663,317 @@ class _MapScreenState extends State<MapScreen> {
                           ),
                         )
                       : // Navigation Mode (Turn-by-Turn - Only in Drive Mode)
-                        GlassCard(
+                      GlassCard(
                           child: Row(
                             children: [
                               // Dynamic Direction Icon (Small)
                               if (_currentInstruction != null)
-                                 Container(
-                                   padding: const EdgeInsets.all(8),
-                                   decoration: BoxDecoration(
-                                     color: Colors.white.withOpacity(0.1),
-                                     shape: BoxShape.circle,
-                                   ),
-                                   child: const Icon(Icons.navigation_rounded, color: Color(0xFFff791a), size: 24),
-                                 ),
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.navigation_rounded,
+                                      color: Color(0xFFff791a), size: 24),
+                                ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [ 
+                                  children: [
                                     Text(
-                                      _stripXmlTags(_currentInstruction ?? "Follow Route"),
-                                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                      _stripXmlTags(_currentInstruction ??
+                                          "Follow Route"),
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold),
                                       overflow: TextOverflow.ellipsis,
                                       maxLines: 2,
                                     ),
-                                    if (_currentInstruction != null && _currentInstruction!.isNotEmpty)
+                                    if (_currentInstruction != null &&
+                                        _currentInstruction!.isNotEmpty)
                                       Padding(
-                                        padding: const EdgeInsets.only(top: 4.0),
+                                        padding:
+                                            const EdgeInsets.only(top: 4.0),
                                         child: Row(
-                                           children: _getLaneIcons(_currentInstruction!),
+                                          children: _getLaneIcons(
+                                              _currentInstruction!),
                                         ),
                                       ),
                                     if (_routeDistance != null)
                                       Text(
                                         _routeDistance!,
-                                        style: const TextStyle(color: Colors.grey, fontSize: 13),
+                                        style: const TextStyle(
+                                            color: Colors.grey, fontSize: 13),
                                       ),
                                   ],
                                 ),
                               ),
-                             IconButton(
-                                icon: const Icon(Icons.close, color: Colors.white54),
+                              IconButton(
+                                icon: const Icon(Icons.close,
+                                    color: Colors.white54),
                                 onPressed: () {
                                   _endDriveMode(); // Cancel navigation
                                 },
-                             )
+                              )
                             ],
                           ),
                         ),
-                  ),
-                 ),
-               );
-             },
-           ),
-          
-          // Search Results Overlay
-          if (_destination == null && _searchResults.isNotEmpty)
-            Positioned(
-              top: 80, // Below search bar
+                ),
+              ),
+            );
+          },
+        ),
+
+        // Search Results Overlay
+        if (_destination == null && _searchResults.isNotEmpty)
+          Positioned(
+            top: 80, // Below search bar
+            left: 16,
+            right: 16,
+            child: SafeArea(
+              child: GlassCard(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _searchResults.length,
+                  itemBuilder: (context, index) {
+                    final result = _searchResults[index];
+                    final address = result['address']['freeformAddress'] ??
+                        'Unknown location';
+                    final name =
+                        result['poi'] != null ? result['poi']['name'] : address;
+
+                    return ListTile(
+                      leading: const Icon(Icons.location_on_outlined,
+                          color: Colors.grey),
+                      title: Text(name,
+                          style: const TextStyle(color: Colors.white),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      subtitle: name != address
+                          ? Text(address,
+                              style: TextStyle(
+                                  color: Colors.grey[400], fontSize: 12),
+                              maxLines: 1)
+                          : null,
+                      onTap: () => _selectSearchResult(result),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+
+        // Report Incident Button (Bottom Left)
+        ValueListenableBuilder<bool>(
+          valueListenable: NavigationService.instance.isNavigating,
+          builder: (context, isNavigating, child) {
+            return Positioned(
+              // Move to Top Left to avoid bottom clutter
+              top: 140,
               left: 16,
-              right: 16,
+              child: FloatingActionButton.small(
+                heroTag: "report_fab",
+                onPressed: _showReportDialog,
+                backgroundColor: Colors.redAccent,
+                child: const Icon(Icons.report_problem, color: Colors.white),
+              ),
+            );
+          },
+        ),
+
+        // HUD Overlay (Bottom) - Only show when Navigating
+        ValueListenableBuilder<bool>(
+          valueListenable: NavigationService.instance.isNavigating,
+          builder: (context, isNavigating, child) {
+            if (!isNavigating)
+              return const SizedBox.shrink(); // Hide if not driving
+
+            return Positioned(
+              bottom: 100 +
+                  MediaQuery.of(context)
+                      .padding
+                      .bottom, // More clearance for End Trip button
+              right: 20, // Right Aligned
               child: SafeArea(
-                child: GlassCard(
-                   child: ListView.builder(
-                     shrinkWrap: true,
-                     itemCount: _searchResults.length,
-                     itemBuilder: (context, index) {
-                       final result = _searchResults[index];
-                       final address = result['address']['freeformAddress'] ?? 'Unknown location';
-                       final name = result['poi'] != null ? result['poi']['name'] : address;
-                       
-                       return ListTile(
-                          leading: const Icon(Icons.location_on_outlined, color: Colors.grey),
-                          title: Text(name, style: const TextStyle(color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: name != address ? Text(address, style: TextStyle(color: Colors.grey[400], fontSize: 12), maxLines: 1) : null,
-                          onTap: () => _selectSearchResult(result),
-                       );
-                     },
-                   ),
-                ),
-              ),
-            ),
-
-
-             
-          // Report Incident Button (Bottom Left)
-          ValueListenableBuilder<bool>(
-            valueListenable: NavigationService.instance.isNavigating,
-            builder: (context, isNavigating, child) {
-               return Positioned(
-                 // Move to Top Left to avoid bottom clutter
-                 top: 140, 
-                 left: 16,
-                 child: FloatingActionButton.small(
-                   heroTag: "report_fab",
-                   onPressed: _showReportDialog,
-                   backgroundColor: Colors.redAccent,
-                   child: const Icon(Icons.report_problem, color: Colors.white),
-                 ),
-              );
-            },
-          ),
-
-          // HUD Overlay (Bottom) - Only show when Navigating
-           ValueListenableBuilder<bool>(
-             valueListenable: NavigationService.instance.isNavigating,
-             builder: (context, isNavigating, child) {
-               if (!isNavigating) return const SizedBox.shrink(); // Hide if not driving
-  
-               return Positioned(
-                bottom: 100 + MediaQuery.of(context).padding.bottom, // More clearance for End Trip button
-                right: 20, // Right Aligned
-                child: SafeArea(
-                  top: false,
-                  bottom: false, 
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end, // Align text to right
-                    children: [
-                      if (_speedLimit != null) ...[ // Only show if limit known
-                        Container(
-                          width: 50,
-                          height: 60,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.black, width: 3),
-                            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text('LIMIT', style: GoogleFonts.montserrat(color: Colors.black, fontSize: 8, fontWeight: FontWeight.w900)),
-                              Text(
-                                 '${_speedLimit}',
-                                 style: GoogleFonts.montserrat(color: Colors.black, fontSize: 24, fontWeight: FontWeight.w900),
+                top: false,
+                bottom: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment:
+                      CrossAxisAlignment.end, // Align text to right
+                  children: [
+                    if (_speedLimit != null) ...[
+                      // Only show if limit known
+                      Container(
+                        width: 60, // Slightly wider
+                        height: 70,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: (_speedLimit != null &&
+                                      _currentSpeed > _speedLimit!)
+                                  ? Colors.redAccent // Red if speeding
+                                  : Colors.black,
+                              width: 4 // Thicker border
                               ),
-                            ],
-                          ),
+                          boxShadow: [
+                            BoxShadow(
+                                color: (_speedLimit != null &&
+                                        _currentSpeed > _speedLimit!)
+                                    ? Colors.red.withOpacity(0.5)
+                                    : Colors.black26,
+                                blurRadius: 10,
+                                spreadRadius: 2)
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                      ],
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('LIMIT',
+                                style: GoogleFonts.montserrat(
+                                    color: Colors.black,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900)),
+                            Text(
+                              '${_speedLimit}',
+                              style: GoogleFonts.montserrat(
+                                  color: Colors.black,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w900),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    // CAMERA ALERT BANNER
+                    if (_showCameraAlert) ...[
                       GlassCard(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: Text(
-                          '${_currentSpeed.toInt()} MPH',
-                          style: GoogleFonts.montserrat(color: const Color(0xFFff791a), fontWeight: FontWeight.bold, fontSize: 16),
-                        ),
-                      ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            const Icon(Icons.videocam,
+                                color: Colors.blueAccent, size: 20),
+                            const SizedBox(width: 8),
+                            Text("TRAFFIC CAM AHEAD",
+                                style: GoogleFonts.montserrat(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12)),
+                          ])),
+                      const SizedBox(height: 8),
                     ],
+
+                    GlassCard(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: Text(
+                        '${_currentSpeed.toInt()} MPH',
+                        style: GoogleFonts.montserrat(
+                            color: const Color(0xFFff791a),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+
+        // CRASH OVERLAY
+        if (_crashDetected)
+          Container(
+            color: Colors.red.withOpacity(0.8),
+            width: double.infinity,
+            height: double.infinity,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.warning, color: Colors.white, size: 100),
+                const SizedBox(height: 20),
+                const Text(
+                  'CRASH DETECTED',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 40,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-              );
-            },
+                const SizedBox(height: 20),
+                const Text(
+                  'Notifying Emergency Contacts...',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 40),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _crashDetected = false;
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.red,
+                  ),
+                  child: const Text('I AM OKAY'),
+                ),
+              ],
+            ),
           ),
-          
-          // CRASH OVERLAY
-          if (_crashDetected)
-            Container(
-              color: Colors.red.withOpacity(0.8),
-              width: double.infinity,
-              height: double.infinity,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.warning, color: Colors.white, size: 100),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'CRASH DETECTED',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 40,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Notifying Emergency Contacts...',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _crashDetected = false;
-                      });
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.red,
-                    ),
-                    child: const Text('I AM OKAY'),
-                  ),
-                ],
-              ),
-            ),
-          
-          // ROLLOVER WARNING OVERLAY
-          if (_rolloverRisk)
-            Positioned.fill(
-              child: Container(
-                color: Colors.red.withOpacity(0.6),
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.warning_amber_rounded, size: 100, color: Colors.white),
-                      Text("ROLLOVER RISK!", 
-                         style: GoogleFonts.montserrat(
-                           fontSize: 32, 
-                           fontWeight: FontWeight.w900, 
-                           color: Colors.white,
-                           shadows: [Shadow(color: Colors.black, blurRadius: 10)]
-                         )
-                      ),
-                      Text("SLOW DOWN", 
-                         style: GoogleFonts.montserrat(
-                           fontSize: 48, 
-                           fontWeight: FontWeight.w900, 
-                           color: Colors.yellowAccent
-                         )
-                      ),
-                    ],
-                  ),
+
+        // ROLLOVER WARNING OVERLAY
+        if (_rolloverRisk)
+          Positioned.fill(
+            child: Container(
+              color: Colors.red.withOpacity(0.6),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        size: 100, color: Colors.white),
+                    Text("ROLLOVER RISK!",
+                        style: GoogleFonts.montserrat(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            shadows: [
+                              Shadow(color: Colors.black, blurRadius: 10)
+                            ])),
+                    Text("SLOW DOWN",
+                        style: GoogleFonts.montserrat(
+                            fontSize: 48,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.yellowAccent)),
+                  ],
                 ),
               ),
             ),
-        ],
-      );
+          ),
+      ],
+    );
   }
+
   // Helper for Route Stats
   Widget _buildRouteStat(IconData icon, String label) {
     return Row(
       children: [
         Icon(icon, color: const Color(0xFFff791a), size: 20),
         const SizedBox(width: 8),
-        Text(
-          label, 
-          style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)
-        ),
+        Text(label,
+            style: GoogleFonts.montserrat(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16)),
       ],
     );
   }
@@ -1728,82 +1982,98 @@ class _MapScreenState extends State<MapScreen> {
   List<Widget> _getLaneIcons(String instruction) {
     List<Widget> lanes = [];
     String lower = instruction.toLowerCase();
-    
+
     // Default: 2 Lanes for city streets, 3 for highway terms
     int laneCount = 2;
-    if (lower.contains("exit") || lower.contains("keep") || lower.contains("merge") || lower.contains("highway")) {
-       laneCount = 3;
+    if (lower.contains("exit") ||
+        lower.contains("keep") ||
+        lower.contains("merge") ||
+        lower.contains("highway")) {
+      laneCount = 3;
     }
 
     // Explicit Overrides from Text
-    if (lower.contains("1 lane") || lower.contains("single lane") || lower.contains("ramp")) {
-       laneCount = 1;
+    if (lower.contains("1 lane") ||
+        lower.contains("single lane") ||
+        lower.contains("ramp")) {
+      laneCount = 1;
     } else if (lower.contains("2 lanes")) {
-       laneCount = 2;
+      laneCount = 2;
     } else if (lower.contains("3 lanes")) {
-       laneCount = 3;
+      laneCount = 3;
     } else if (lower.contains("4 lanes")) {
-       laneCount = 4;
+      laneCount = 4;
     }
-    
+
     // Determine Recommended Lane Index (0 = Left ... N = Right)
     List<int> recommended = [];
-    
+
     if (laneCount == 1) {
-       recommended = [0]; // The only lane is the right lane
+      recommended = [0]; // The only lane is the right lane
     } else {
-        if (lower.contains("left") || lower.contains("merge left")) {
-           recommended = [0]; // Left Lane
-           if (lower.contains("2 lanes") && laneCount > 2) recommended = [0, 1];
-        } else if (lower.contains("right") || lower.contains("merge right") || lower.contains("exit")) {
-           recommended = [laneCount - 1]; // Right-most Lane
-           if (lower.contains("2 lanes") && laneCount > 2) recommended = [laneCount - 2, laneCount - 1];
-        } else {
-           // Straight or Keep -> Center lanes
-           if (laneCount == 2) recommended = [0, 1]; // Use both? Or just right? Let's say both for "continue"
-           if (laneCount == 3) recommended = [1]; // Middle
-           if (laneCount >= 4) recommended = [1, 2]; // Middle two
-        }
+      if (lower.contains("left") || lower.contains("merge left")) {
+        recommended = [0]; // Left Lane
+        if (lower.contains("2 lanes") && laneCount > 2) recommended = [0, 1];
+      } else if (lower.contains("right") ||
+          lower.contains("merge right") ||
+          lower.contains("exit")) {
+        recommended = [laneCount - 1]; // Right-most Lane
+        if (lower.contains("2 lanes") && laneCount > 2)
+          recommended = [laneCount - 2, laneCount - 1];
+      } else {
+        // Straight or Keep -> Center lanes
+        if (laneCount == 2)
+          recommended = [
+            0,
+            1
+          ]; // Use both? Or just right? Let's say both for "continue"
+        if (laneCount == 3) recommended = [1]; // Middle
+        if (laneCount >= 4) recommended = [1, 2]; // Middle two
+      }
     }
 
     for (int i = 0; i < laneCount; i++) {
-       bool isActive = recommended.contains(i);
-       IconData icon = Icons.arrow_upward_rounded;
-       
-       if (isActive) {
-          if (lower.contains("left") && !lower.contains("keep")) {
-            icon = Icons.turn_left_rounded;
-          } else if ((lower.contains("right") || lower.contains("exit")) && !lower.contains("keep")) {
-            icon = Icons.turn_right_rounded;
-          } else if (lower.contains("u-turn")) {
-            icon = Icons.u_turn_left_rounded;
-          }
-       }
+      bool isActive = recommended.contains(i);
+      IconData icon = Icons.arrow_upward_rounded;
 
-       lanes.add(
-         Padding(
-           padding: const EdgeInsets.symmetric(horizontal: 4.0), // More spacing
-           child: Container(
-             padding: const EdgeInsets.all(4),
-             decoration: isActive ? BoxDecoration(
-               color: Colors.white.withOpacity(0.1),
-               borderRadius: BorderRadius.circular(4),
-               border: Border.all(color: const Color(0xFFff791a).withOpacity(0.5)),
-             ) : null,
-             child: Icon(
-               icon,
-               color: isActive ? const Color(0xFFff791a) : Colors.white24, // Highlight Orange
-               size: 24,
-             ),
-           ),
-         )
-       );
+      if (isActive) {
+        if (lower.contains("left") && !lower.contains("keep")) {
+          icon = Icons.turn_left_rounded;
+        } else if ((lower.contains("right") || lower.contains("exit")) &&
+            !lower.contains("keep")) {
+          icon = Icons.turn_right_rounded;
+        } else if (lower.contains("u-turn")) {
+          icon = Icons.u_turn_left_rounded;
+        }
+      }
+
+      lanes.add(Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4.0), // More spacing
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: isActive
+              ? BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                      color: const Color(0xFFff791a).withOpacity(0.5)),
+                )
+              : null,
+          child: Icon(
+            icon,
+            color: isActive
+                ? const Color(0xFFff791a)
+                : Colors.white24, // Highlight Orange
+            size: 24,
+          ),
+        ),
+      ));
     }
     return lanes;
   }
+
   // Helper to strip XML tags (e.g. <street>Dolorosa</street>)
   String _stripXmlTags(String directInstruction) {
     return directInstruction.replaceAll(RegExp(r'<[^>]*>'), '');
   }
-
 } // End of State class

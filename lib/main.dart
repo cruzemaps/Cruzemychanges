@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:cruze_mobile/screens/alerts_screen.dart';
 import 'package:cruze_mobile/screens/login_screen.dart';
 import 'package:cruze_mobile/screens/map_screen.dart';
 import 'package:cruze_mobile/screens/profile_screen.dart';
 import 'package:cruze_mobile/widgets/nav_bar.dart'; // Import custom NavBar
 import 'package:cruze_mobile/services/navigation_service.dart'; // Import NavigationService
+import 'package:cruze_mobile/services/user_service.dart';
+import 'package:cruze_mobile/services/telemetry_service.dart';
 //hi
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import dotenv
 import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
@@ -19,15 +23,28 @@ import 'package:cruze_mobile/services/crash_detection_service.dart'; // Import C
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: "env/.env");
-  
+
+  // Enforce portrait mode initially
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+
+  // Initialize Background Telemetry Task
+  final TelemetryService telemetryService = TelemetryService();
+  await telemetryService.initForegroundTask();
+  await telemetryService.requestPermissions();
+
   // Start Services
   MicroBrakingService.instance.startMonitoring();
   PotholeService.instance.startMonitoring();
   DiagnosticsService.instance.startMonitoring();
   BlackBoxService.instance.startRecording();
   RolloverService.instance.startMonitoring();
-  CrashDetectionService.instance.startMonitoring(); // Tri-Sensor Crash Detection
-  
+  CrashDetectionService.instance
+      .startMonitoring(); // Tri-Sensor Crash Detection
+  TelemetryService.instance.startMonitoring(); // Telemetry Service
+
   runApp(const CruzeApp());
 }
 
@@ -54,9 +71,9 @@ class CruzeApp extends StatelessWidget {
         ),
         textTheme: GoogleFonts.montserratTextTheme(
           ThemeData.dark().textTheme.apply(
-            bodyColor: Colors.white,
-            displayColor: const Color(0xFFC0C0C0), // Silver headers
-          ),
+                bodyColor: Colors.white,
+                displayColor: const Color(0xFFC0C0C0), // Silver headers
+              ),
         ),
         useMaterial3: true,
       ),
@@ -98,20 +115,20 @@ class _MainScaffoldState extends State<MainScaffold> {
       body: Stack(
         children: [
           // Background (Global Texture)
-           Container(
-             decoration: const BoxDecoration(
-               gradient: LinearGradient(
-                 begin: Alignment.topLeft,
-                 end: Alignment.bottomRight,
-                 colors: [
-                   Color(0xFF0F0F0F), // Darker charcoal
-                   Color(0xFF1A1A1A), // Lighter charcoal
-                 ],
-               ),
-             ),
-           ),
-           
-           // Screen Content
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0F0F0F), // Darker charcoal
+                  Color(0xFF1A1A1A), // Lighter charcoal
+                ],
+              ),
+            ),
+          ),
+
+          // Screen Content
           _screens[_selectedIndex],
 
           // Floating Nav Bar (Hidden in Drive Mode)
@@ -121,7 +138,9 @@ class _MainScaffoldState extends State<MainScaffold> {
               return AnimatedPositioned(
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
-                bottom: isNavigating ? -200 : 0, // Slide off-screen (increased for safe area)
+                bottom: isNavigating
+                    ? -200
+                    : 0, // Slide off-screen (increased for safe area)
                 left: 0,
                 right: 0,
                 child: GlassNavBar(
@@ -136,4 +155,3 @@ class _MainScaffoldState extends State<MainScaffold> {
     );
   }
 }
-
