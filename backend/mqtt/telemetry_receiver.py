@@ -7,10 +7,14 @@ from datetime import datetime
 # Dictionary mapping: client_id -> { lat, lon, speed, heading, timestamp }
 ACTIVE_TRUCKS = {}
 TRUCK_LOCK = threading.Lock()
+_mqtt_connected_once = False
 
 # Define event callbacks
 def on_connect(client, userdata, flags, rc):
-    print(f"📡 MQTT Receiver Connected with result code {rc}")
+    global _mqtt_connected_once
+    if not _mqtt_connected_once:
+        print(f"📡 MQTT Receiver Connected with result code {rc}")
+        _mqtt_connected_once = True
     # Subscribe to the truck telemetry topic
     client.subscribe("cruze/telemetry/trucks")
 
@@ -50,6 +54,8 @@ def start_mqtt_receiver(broker="test.mosquitto.org", port=1883):
     client = mqtt.Client(client_id="cruze_backend_receiver")
     client.on_connect = on_connect
     client.on_message = on_message
+    # Slow down reconnections to avoid log spam (min 5s, max 30s)
+    client.reconnect_delay_set(min_delay=5, max_delay=30)
 
     print(f"🔌 Connecting to MQTT Broker: {broker}:{port}...")
     try:
