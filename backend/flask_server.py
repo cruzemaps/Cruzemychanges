@@ -22,7 +22,7 @@ from azure.maps.search import MapsSearchClient
 # Route Monitor Imports
 from cameras.route_monitor import RouteManager
 from cameras.traffic_pipeline import TrafficAnalyzer, StreamManager
-from lane_matching import get_lane_geometry, match_lane
+
 
 
 
@@ -814,7 +814,7 @@ def api_lane_geometry():
         if not route_coords:
             return jsonify({"error": "No route provided"}), 400
 
-        result = get_lane_geometry(route_coords, buffer_meters=buffer_meters)
+        result = {"lanes": [], "message": "Lane geometry module disabled"}
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -836,7 +836,7 @@ def api_lane_match():
         if lat is None or lon is None:
             return jsonify({"error": "Missing lat/lon"}), 400
 
-        match = match_lane(float(lat), float(lon), heading=heading, speed_mps=speed_mps)
+        match = {"lane_id": "unknown", "confidence": 0.0, "message": "Lane matching disabled"}
         return jsonify(match), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
