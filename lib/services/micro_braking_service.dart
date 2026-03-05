@@ -60,7 +60,7 @@ class MicroBrakingService {
     print("🛑 Micro-Braking Detected! Force: ${force.toStringAsFixed(2)}g, Duration: ${duration}ms");
     
     try {
-      final String baseUrl = "http://127.0.0.1:7071"; // For Simulator
+      final String baseUrl = "http://192.168.1.107:7071"; // For Simulator
       // final String baseUrl = "http://10.0.2.2:7071"; // For Android Emulator
       
       final response = await http.post(

@@ -11,8 +11,8 @@ class PlatooningService {
 
   Timer? _pollingTimer;
   final String _baseUrl = kIsWeb 
-      ? "http://localhost:7071" 
-      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "http://127.0.0.1:7071");
+      ? "http://192.168.1.107:7071" 
+      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "http://192.168.1.107:7071");
 
   final StreamController<List<dynamic>> _messagesController = StreamController<List<dynamic>>.broadcast();
   Stream<List<dynamic>> get messagesStream => _messagesController.stream;
