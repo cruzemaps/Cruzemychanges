@@ -11,8 +11,8 @@ class PlatooningService {
 
   Timer? _pollingTimer;
   final String _baseUrl = kIsWeb 
-      ? "https://unmaternal-parthenia-oarless.ngrok-free.app" 
-      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "https://unmaternal-parthenia-oarless.ngrok-free.app");
+      ? "http://100.66.61.24:7071" 
+      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "http://100.66.61.24:7071");
 
   final StreamController<List<dynamic>> _messagesController = StreamController<List<dynamic>>.broadcast();
   Stream<List<dynamic>> get messagesStream => _messagesController.stream;

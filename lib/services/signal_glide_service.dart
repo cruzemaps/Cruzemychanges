@@ -13,8 +13,8 @@ class SignalGlideService {
   Timer? _pollingTimer;
   Map<String, dynamic>? _currentSignalData;
   final String _baseUrl = kIsWeb 
-      ? "https://unmaternal-parthenia-oarless.ngrok-free.app" 
-      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "https://unmaternal-parthenia-oarless.ngrok-free.app");
+      ? "http://100.66.61.24:7071" 
+      : (defaultTargetPlatform == TargetPlatform.android ? "http://10.0.2.2:7071" : "http://100.66.61.24:7071");
 
   final StreamController<Map<String, dynamic>> _signalStreamController = StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get signalStream => _signalStreamController.stream;
