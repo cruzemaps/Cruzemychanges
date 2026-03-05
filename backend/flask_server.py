@@ -13,7 +13,7 @@ import queue
 from datetime import datetime
 from flask import Flask, jsonify, request, render_template, Response, send_from_directory, render_template
 from flask_cors import CORS
-from api_key_check import require_txdot_key
+
 from werkzeug.utils import secure_filename
 import requests
 from azure.core.credentials import AzureKeyCredential
@@ -646,7 +646,7 @@ def crash_report():
 # --- New TxDOT Camera API Endpoints ---
 
 @app.route('/api/v1/txdot/cameras', methods=['GET'])
-@require_txdot_key
+
 def get_txdot_cameras_api():
     """Secured API for the App to get camera metadata."""
     path = os.path.join(BASE_DIR, "data", "cameras_full.json")
@@ -658,7 +658,7 @@ def get_txdot_cameras_api():
         return jsonify({"error": "Failed to load camera data", "details": str(e)}), 500
 
 @app.route('/dashboard/cameras', methods=['GET'])
-@require_txdot_key
+
 def camera_dashboard():
     """Secured dashboard for viewing live camera feeds grouped by jurisdiction."""
     path = os.path.join(BASE_DIR, "data", "cameras_full.json")
