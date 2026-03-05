@@ -8,8 +8,8 @@ import json
 from ultralytics import YOLO
 import os
 from .tracking.fusion import FusionEngine
-from ..mqtt.telemetry_receiver import get_active_trucks
-from ..routing.j2735_translator import generate_bsm, process_phantom_jam_logic, send_tim_alert_to_app
+from mqtt.telemetry_receiver import get_active_trucks
+from routing.j2735_translator import generate_bsm, process_phantom_jam_logic, send_tim_alert_to_app
 
 # Load a lightweight YOLOv8 model
 # It will download the model on first run
